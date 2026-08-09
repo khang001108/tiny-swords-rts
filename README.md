@@ -1,48 +1,50 @@
-# Tiny Swords RTS — đấu online 1vs1
+# Tiny Swords RTS — đấu Bot hoặc đấu online 1vs1
 
-Game RTS nhẹ: xây kinh tế (vàng tự sinh theo thời gian), chiêu mộ quân (Lính thường /
-Chiến binh / Cung thủ), quân tự động tiến về phía căn cứ đối thủ và giao chiến.
-2 người chơi thấy nhau di chuyển/đánh nhau **real-time** qua Supabase Realtime
-(broadcast + presence) — không cần server riêng, không cần bảng database nào.
+Game RTS: xây kinh tế (vàng tự sinh), có 3 kích thước bản đồ (Nhỏ / Vừa / Lớn) với
+cụm công trình quanh căn cứ (Tháp canh tự động bắn địch trong tầm, Doanh trại, Nhà
+dân, Tu viện — công trình càng nhiều thì giới hạn quân số càng cao), chiêu mộ 3 loại
+quân (Lính thường / Chiến binh / Cung thủ) với animation đi/đánh thật. Chơi được:
+- **Vs Bot**: đấu với AI ngay lập tức, không cần cấu hình gì (không cần Supabase).
+- **Vs Người**: 2 người thấy nhau di chuyển/đánh nhau **real-time** qua Supabase
+  Realtime (broadcast + presence) — không cần server riêng, không cần bảng database.
 
 ## Stack
 - Next.js 14 (App Router) + TypeScript + Tailwind
-- Phaser 3 (canvas game engine)
-- Supabase Realtime (kênh broadcast — miễn phí, không cần schema DB)
+- Phaser 3 (canvas game engine) — sprite animation thật (idle/walk/attack) từ spritesheet
+- Supabase Realtime (chỉ dùng cho chế độ Vs Người — kênh broadcast, không cần schema DB)
 - Deploy: Vercel
 
 ## Asset
-Sprite lấy từ bộ **Tiny Swords** (Pixel Frog) bạn đã upload — đã copy sẵn phần cần dùng
-vào `public/assets/`. Nếu muốn đổi unit/hình khác, copy thêm file từ 2 file zip gốc vào
-`public/assets/units|castle|terrain|ui` rồi trỏ đường dẫn trong
-`game/scenes/MainScene.ts` (hàm `preload()`).
+Sprite lấy từ bộ **Tiny Swords** (Pixel Frog) bạn đã upload (cả bản đầy đủ và Free Pack
+cập nhật mới hơn) — đã copy sẵn phần cần dùng vào `public/assets/`:
+- `units/` — Pawn/Warrior/Archer (xanh + đỏ), spritesheet 192×192/frame
+- `buildings/` — Castle, Tower, Barracks, House1, Monastery (xanh + đỏ)
+- `terrain/` — 3 texture cỏ khác nhau cho 3 kích thước bản đồ, cây, bụi/đá/nấm trang trí
 
 ## Chạy thử ở máy local
 
 ```bash
 npm install
-cp .env.local.example .env.local   # rồi điền URL + anon key Supabase (xem bên dưới)
+cp .env.local.example .env.local   # chỉ cần điền nếu muốn thử chế độ Vs Người
 npm run dev
 ```
 
-Mở 2 tab (hoặc 2 trình duyệt khác nhau) tới `http://localhost:3000`, một tab bấm
-**"Tạo phòng mới"**, tab còn lại nhập đúng mã phòng rồi bấm **"Vào"** — trận đấu tự bắt
-đầu khi đủ 2 người.
+Mở `http://localhost:3000` → chọn **"Chơi với Bot"** để thử ngay, không cần cấu hình
+gì thêm. Muốn thử Vs Người thì mở 2 tab, một tab **"Tạo phòng mới"**, tab còn lại nhập
+đúng mã phòng — kích thước bản đồ được mã hoá sẵn trong ký tự đầu của mã phòng nên cả 2
+bên luôn đồng bộ đúng 1 bản đồ.
 
-## 1. Tạo project Supabase (miễn phí, ~2 phút)
+## 1. Tạo project Supabase (chỉ cần cho chế độ Vs Người, ~2 phút)
 1. Vào https://supabase.com → **New project**.
-2. Sau khi tạo xong, vào **Project Settings → API**.
-3. Copy `Project URL` → dán vào `NEXT_PUBLIC_SUPABASE_URL`.
-4. Copy khóa `anon public` → dán vào `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-5. Vào **Database → Replication** (hoặc **Project Settings → Realtime**) đảm bảo
-   Realtime đang bật cho project (mặc định đã bật sẵn, không cần tạo bảng nào vì
-   game này chỉ dùng kênh broadcast/presence thuần, không đọc/ghi Postgres).
+2. Vào **Project Settings → API**, copy `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`.
+3. Copy khóa `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+4. Không cần tạo bảng nào — game chỉ dùng kênh broadcast/presence thuần.
 
 ## 2. Đẩy code lên GitHub
 ```bash
 git init
 git add .
-git commit -m "Tiny Swords RTS - online 1vs1"
+git commit -m "Tiny Swords RTS - vs Bot + vs Người + chọn map"
 git branch -M main
 git remote add origin https://github.com/<username>/<repo>.git
 git push -u origin main
@@ -50,29 +52,28 @@ git push -u origin main
 
 ## 3. Deploy lên Vercel
 1. Vào https://vercel.com → **Add New Project** → chọn repo vừa push.
-2. Ở bước **Environment Variables**, thêm đúng 2 biến:
+2. Thêm 2 biến môi trường (bỏ qua nếu chỉ dùng chế độ Vs Bot):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-3. Bấm **Deploy**. Xong là có link chơi online, gửi cho bạn bè là đấu được.
+3. Bấm **Deploy**.
 
 ## Cách chơi
 - Vàng tự sinh theo thời gian (4/giây).
-- Bấm nút chiêu mộ quân — quân tự đi về phía căn cứ địch, tự đánh quân địch hoặc
-  căn cứ địch trong tầm.
-- Căn cứ về 0 máu → thua. Có UI thông báo thắng/thua ngay khi kết thúc.
+- Bấm nút chiêu mộ quân — quân tự đi về phía căn cứ địch, tự đánh quân địch/căn cứ
+  trong tầm. Số quân tối đa cùng lúc = 6 + 2 mỗi công trình quanh căn cứ (bản đồ Lớn có
+  4 công trình → tối đa 14 quân).
+- Tháp canh tự động bắn quân địch đi ngang qua trong tầm 150px, không cần điều khiển.
+- Căn cứ về 0 máu → thua.
 
-## Kiến trúc đồng bộ (quan trọng nếu bạn muốn mở rộng)
-Mỗi client **tự chịu trách nhiệm (authoritative)** cho quân và máu căn cứ **của chính
-mình**:
-- Client A mô phỏng quân của A cục bộ, phát (`broadcast`) vị trí/HP quân của A ~7-8
-  lần/giây cho đối thủ.
-- Khi quân của A vào tầm đánh quân/căn cứ của B, A gửi sự kiện `hit` (kèm sát thương)
-  cho B — B mới là người thực sự trừ máu quân/căn cứ của B và báo lại HP mới ở lần
-  broadcast tiếp theo.
-- Nhờ vậy không bao giờ có 2 client tranh nhau quyền sửa cùng 1 giá trị HP → không cần
-  server trung tâm, dùng thẳng Supabase Realtime là đủ, chạy tốt trên hạ tầng
-  serverless của Vercel.
+## Kiến trúc đồng bộ & AI
+- **Vs Người**: mỗi client tự chịu trách nhiệm (authoritative) cho quân & máu căn cứ
+  *của chính mình*, gửi `hit` cho đối thủ khi gây sát thương — không bao giờ 2 client
+  tranh nhau sửa cùng 1 giá trị, chạy tốt trên serverless của Vercel.
+- **Vs Bot**: `game/opponent.ts` (`BotOpponent`) mô phỏng y hệt giao diện của kết nối
+  mạng (`onState`/`onHit`/`onGameOver`) nên `MainScene` dùng chung 1 luồng logic cho cả
+  2 chế độ — không cần if/else rải rác trong code chiến đấu.
 
-Muốn thêm loại quân, sửa `game/entities.ts`. Muốn đổi bố cục bản đồ/cách quân di
-chuyển (ví dụ thêm nhiều làn, pathfinding vòng vật cản...), sửa
-`game/scenes/MainScene.ts`.
+Muốn thêm loại quân/công trình, sửa `game/entities.ts` (`UNIT_CONFIGS`,
+`BUILDING_VISUALS`, `MAP_PRESETS`). Muốn chỉnh độ khó bot, sửa tham số `difficulty`
+khi khởi tạo `BotOpponent` trong `MainScene.connectRoom()`.
+

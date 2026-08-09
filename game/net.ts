@@ -40,12 +40,24 @@ type Handlers = {
   onOpponentLeft?: () => void;
 };
 
+/** Interface chung cho "đối thủ" — có thể là người thật qua mạng (RoomSync) hoặc AI cục bộ (BotOpponent) */
+export interface OpponentLink {
+  readonly playerId: string;
+  side: Side | null;
+  on(handlers: Handlers): void;
+  connect(): Promise<Side>;
+  sendState(p: Omit<StatePayload, "from" | "t">): void;
+  sendHit(targetId: string, damage: number): void;
+  sendGameOver(loserSide: Side): void;
+  disconnect(): void;
+}
+
 /**
  * RoomSync quản lý 1 Supabase Realtime channel cho 1 phòng đấu 1vs1.
  * Người tạo phòng (host) luôn là "left", người vào sau (guest) là "right".
  * Không cần bảng DB nào — chỉ dùng broadcast + presence, nên không tốn quota Postgres.
  */
-export class RoomSync {
+export class RoomSync implements OpponentLink {
   private channel: RealtimeChannel;
   public readonly playerId: string;
   public side: Side | null = null;
@@ -135,9 +147,17 @@ export class RoomSync {
   }
 }
 
-export function randomRoomCode(): string {
+export function randomRoomCode(mapSize: "small" | "medium" | "large" = "medium"): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
   for (let i = 0; i < 5; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
+  const prefix = mapSize === "small" ? "S" : mapSize === "large" ? "L" : "M";
+  return prefix + out;
+}
+
+export function mapSizeFromRoomCode(code: string): "small" | "medium" | "large" {
+  const c = code.trim().toUpperCase()[0];
+  if (c === "S") return "small";
+  if (c === "L") return "large";
+  return "medium";
 }

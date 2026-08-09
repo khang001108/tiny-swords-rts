@@ -3,14 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
 import { gameEvents, HudUpdate, GameEndUpdate } from "@/game/events";
-import { UNIT_CONFIGS, UnitType } from "@/game/entities";
+import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS } from "@/game/entities";
 
 export default function GameCanvas({
   roomCode,
   isHost,
+  mode,
+  mapSize,
 }: {
   roomCode: string;
   isHost: boolean;
+  mode: "bot" | "online";
+  mapSize: MapSize;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudUpdate>({
@@ -20,12 +24,14 @@ export default function GameCanvas({
     enemyBaseHp: 1,
     enemyBaseMaxHp: 1,
     opponentConnected: false,
+    myUnits: 0,
+    popCap: 6,
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const game = createPhaserGame(containerRef.current, roomCode, isHost);
+    const game = createPhaserGame(containerRef.current, roomCode, isHost, mode, mapSize);
 
     const onHud = (p: HudUpdate) => setHud(p);
     const onEnd = (p: GameEndUpdate) => setResult(p);
@@ -39,22 +45,30 @@ export default function GameCanvas({
       game.destroy(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomCode, isHost]);
+  }, [roomCode, isHost, mode, mapSize]);
 
   const spawn = (type: UnitType) => gameEvents.emit("spawn-unit", type);
+  const preset = MAP_PRESETS[mapSize];
 
   return (
-    <div className="w-full max-w-[1280px] mx-auto">
-      <div className="flex items-center justify-between mb-2 px-1 text-sm text-white/90">
-        <span>
-          Phòng: <span className="font-mono font-bold">{roomCode}</span>
-        </span>
+    <div className="w-full mx-auto" style={{ maxWidth: preset.worldW }}>
+      <div className="flex items-center justify-between mb-2 px-1 text-sm text-white/90 flex-wrap gap-1">
+        {mode === "online" ? (
+          <span>
+            Phòng: <span className="font-mono font-bold">{roomCode}</span>
+          </span>
+        ) : (
+          <span className="text-white/60">Chế độ: Đấu với Bot</span>
+        )}
         <span>
           {hud.opponentConnected ? (
             <span className="text-emerald-400">● Đối thủ đã vào</span>
           ) : (
             <span className="text-amber-400">● Đang chờ đối thủ...</span>
           )}
+        </span>
+        <span className="text-white/70">
+          Quân: {hud.myUnits}/{hud.popCap}
         </span>
         <span>
           Vàng: <span className="font-bold text-yellow-300">{hud.gold}</span>
@@ -87,7 +101,8 @@ export default function GameCanvas({
       <div className="flex gap-2 mt-3 px-1 flex-wrap">
         {(Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
           const cfg = UNIT_CONFIGS[type];
-          const disabled = hud.gold < cfg.cost || !hud.opponentConnected;
+          const atCap = hud.myUnits >= hud.popCap;
+          const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
           return (
             <button
               key={type}
@@ -104,6 +119,11 @@ export default function GameCanvas({
           );
         })}
       </div>
+      {hud.myUnits >= hud.popCap && (
+        <p className="text-xs text-amber-400/80 mt-1 px-1">
+          Đã đạt giới hạn quân số — xây thêm doanh trại (bản đồ lớn hơn) để tăng giới hạn, hoặc chờ quân hiện tại giao chiến.
+        </p>
+      )}
     </div>
   );
 }

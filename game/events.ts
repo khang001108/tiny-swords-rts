@@ -10,6 +10,8 @@ export interface HudUpdate {
   enemyBaseHp: number;
   enemyBaseMaxHp: number;
   opponentConnected: boolean;
+  myUnits: number;
+  popCap: number;
 }
 
 export interface GameEndUpdate {
