@@ -237,6 +237,9 @@ export default function GameCanvas({
           Đã đạt giới hạn quân số — xây thêm nhà dân hoặc để dân khai thác thêm Gỗ/Thịt để nới giới hạn.
         </p>
       )}
+      <p className="text-xs text-white/40 mt-1 px-1">
+        💡 Bấm vào lính/dân của bạn để chọn, rồi bấm vào nơi muốn tới (hoặc quân địch để đánh, hoặc mỏ khác để đổi việc cho dân).
+      </p>
     </div>
   );
 }

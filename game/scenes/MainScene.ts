@@ -57,6 +57,7 @@ interface LocalUnit {
   state: "walk" | "attack" | "dead";
   lastAnimState: "walk" | "attack";
   lastAttackAt: number;
+  manualTarget: { x: number; y: number } | null;
 }
 
 interface RemoteUnit {
@@ -102,6 +103,10 @@ export default class MainScene extends Phaser.Scene {
 
   private myTowerPos: { x: number; y: number } | null = null;
   private towerLastAttackAt = 0;
+
+  private selected: { kind: "unit" | "villager"; id: string } | null = null;
+  private selectionRing!: Phaser.GameObjects.Graphics;
+  private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
   private localUnits = new Map<string, LocalUnit>();
   private remoteUnits = new Map<string, RemoteUnit>();
@@ -216,6 +221,8 @@ export default class MainScene extends Phaser.Scene {
 
     this.myCastle = this.add.image(0, 0, "castle_blue").setScale(0.5).setDepth(5);
     this.enemyCastle = this.add.image(0, 0, "castle_red").setScale(0.5).setDepth(5);
+    this.enemyCastle.setInteractive({ cursor: "pointer" });
+    this.enemyCastle.setData("kind", "enemy");
     this.myBaseBar = this.add.graphics().setDepth(6);
     this.enemyBaseBar = this.add.graphics().setDepth(6);
 
@@ -235,6 +242,11 @@ export default class MainScene extends Phaser.Scene {
     });
 
     this.minimapG = this.add.graphics().setDepth(100).setScrollFactor(0);
+    this.selectionRing = this.add.graphics().setDepth(12);
+    this.input.on("pointerdown", this.handlePointerDown, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off("pointerdown", this.handlePointerDown, this);
+    });
 
     this.connectRoom();
     this.emitHud();
@@ -340,13 +352,29 @@ export default class MainScene extends Phaser.Scene {
       const ny = Phaser.Math.Clamp(midY + spec.offsetY + jitterY, this.preset.laneYMin - 80, this.preset.laneYMax + 80);
       myNodePos[spec.kind] = { x: nx, y: ny };
       if (spec.kind === "gold") {
-        this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(4);
+        const img = this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(4);
+        img.setInteractive({ cursor: "pointer" });
+        img.setData("kind", "resource");
+        img.setData("resourceKind", "gold");
       } else if (spec.kind === "wood") {
-        this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(4).play("res_tree1-sway");
-        this.add.sprite(nx + 20, ny + 10, "res_tree2", 0).setScale(0.36).setDepth(4);
+        const t1 = this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(4);
+        t1.play("res_tree1-sway");
+        const t2 = this.add.sprite(nx + 20, ny + 10, "res_tree2", 0).setScale(0.36).setDepth(4);
+        [t1, t2].forEach((s) => {
+          s.setInteractive({ cursor: "pointer" });
+          s.setData("kind", "resource");
+          s.setData("resourceKind", "wood");
+        });
       } else {
-        this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(4).play("res_sheep-idle");
-        this.add.sprite(nx + 18, ny + 8, "res_sheep", 0).setScale(0.5).setDepth(4).play("res_sheep-idle");
+        const s1 = this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(4);
+        s1.play("res_sheep-idle");
+        const s2 = this.add.sprite(nx + 18, ny + 8, "res_sheep", 0).setScale(0.5).setDepth(4);
+        s2.play("res_sheep-idle");
+        [s1, s2].forEach((s) => {
+          s.setInteractive({ cursor: "pointer" });
+          s.setData("kind", "resource");
+          s.setData("resourceKind", "meat");
+        });
       }
     }
 
@@ -492,6 +520,68 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh ───────────
+  private handlePointerDown(pointer: Phaser.Input.Pointer) {
+    if (this.gameOver || this.paused) return;
+    const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
+    const hit = hits[0];
+
+    if (hit) {
+      const kind = hit.getData("kind");
+      if (kind === "my-unit") {
+        this.selected = { kind: "unit", id: hit.getData("unitId") };
+        return;
+      }
+      if (kind === "my-villager") {
+        this.selected = { kind: "villager", id: hit.getData("villagerId") };
+        return;
+      }
+      if (kind === "resource" && this.selected?.kind === "villager") {
+        this.myVillagers?.reassignKind(this.selected.id, hit.getData("resourceKind"));
+        return;
+      }
+      if (kind === "enemy" && this.selected) {
+        const obj = hit as unknown as { x: number; y: number };
+        this.issueMoveCommand(obj.x, obj.y);
+        return;
+      }
+    }
+    if (this.selected) {
+      this.issueMoveCommand(pointer.worldX, pointer.worldY);
+    }
+  }
+
+  private issueMoveCommand(x: number, y: number) {
+    if (!this.selected) return;
+    const cx = Phaser.Math.Clamp(x, 15, this.preset.worldW - 15);
+    const cy = Phaser.Math.Clamp(y, 15, this.preset.worldH - 15);
+    if (this.selected.kind === "unit") {
+      const u = this.localUnits.get(this.selected.id);
+      if (u) u.manualTarget = { x: cx, y: cy };
+      else this.selected = null;
+    } else {
+      this.myVillagers?.commandMove(this.selected.id, cx, cy);
+    }
+  }
+
+  private drawSelectionRing() {
+    this.selectionRing.clear();
+    if (!this.selected) return;
+    let pos: { x: number; y: number } | null = null;
+    if (this.selected.kind === "unit") {
+      const u = this.localUnits.get(this.selected.id);
+      pos = u ? { x: u.x, y: u.y } : null;
+    } else {
+      pos = this.myVillagers?.getPos(this.selected.id) ?? null;
+    }
+    if (!pos) {
+      this.selected = null;
+      return;
+    }
+    this.selectionRing.lineStyle(2, 0xffffff, 0.85);
+    this.selectionRing.strokeEllipse(pos.x, pos.y, 36, 18);
+  }
+
   // ── Spawn ──────────────────────────────────────────────────────────
   private handleSpawnVillager() {
     if (this.gameOver || !this.myVillagers || !this.myVillagers.canAdd()) return;
@@ -534,6 +624,9 @@ export default class MainScene extends Phaser.Scene {
     sprite.setFlipX(this.mySide === "right");
     sprite.play(`${spriteKey}-walk`);
     sprite.setScale(0);
+    sprite.setInteractive({ cursor: "pointer" });
+    sprite.setData("kind", "my-unit");
+    sprite.setData("unitId", id);
     this.tweens.add({ targets: sprite, scale: 0.4, duration: 220, ease: "Back.Out" });
     const hpBar = this.add.graphics().setDepth(11);
 
@@ -550,6 +643,7 @@ export default class MainScene extends Phaser.Scene {
       state: "walk",
       lastAnimState: "walk",
       lastAttackAt: 0,
+      manualTarget: null,
     });
   }
 
@@ -571,6 +665,8 @@ export default class MainScene extends Phaser.Scene {
           .setDepth(10);
         sprite.setFlipX(p.side === "right");
         sprite.play(`${spriteKey}-walk`);
+        sprite.setInteractive({ cursor: "pointer" });
+        sprite.setData("kind", "enemy");
         const hpBar = this.add.graphics().setDepth(11);
         ru = { sprite, hpBar, targetX: u.x, y: sprite.y, hp: u.hp, maxHp: u.maxHp, type: u.type, spriteKey, lastAnimState: "walk" };
         this.remoteUnits.set(u.id, ru);
@@ -647,13 +743,13 @@ export default class MainScene extends Phaser.Scene {
       let nearestId: string | null = null;
       let nearestDist = Infinity;
       for (const [rid, ru] of this.remoteUnits) {
-        const d = Math.abs(ru.sprite.x - u.x);
+        const d = Phaser.Math.Distance.Between(u.x, u.y, ru.sprite.x, ru.sprite.y);
         if (d < nearestDist) {
           nearestDist = d;
           nearestId = rid;
         }
       }
-      const distToBase = Math.abs(enemyBaseX - u.x);
+      const distToBase = Phaser.Math.Distance.Between(u.x, u.y, enemyBaseX, this.preset.worldH / 2);
 
       const canHitUnit = nearestId !== null && nearestDist <= cfg.range;
       const canHitBase = !canHitUnit && distToBase <= Math.max(cfg.range, BASE_HIT_RADIUS);
@@ -679,8 +775,25 @@ export default class MainScene extends Phaser.Scene {
           u.lastAnimState = "walk";
           u.sprite.play(`${u.spriteKey}-walk`, true);
         }
-        u.x += dir * cfg.speed * dt;
-        u.x = Phaser.Math.Clamp(u.x, this.preset.baseMargin, this.preset.worldW - this.preset.baseMargin);
+        if (u.manualTarget) {
+          const dx = u.manualTarget.x - u.x;
+          const dy = u.manualTarget.y - u.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const step = cfg.speed * dt;
+          if (d <= step) {
+            u.x = u.manualTarget.x;
+            u.y = u.manualTarget.y;
+            u.manualTarget = null;
+          } else {
+            u.x += (dx / d) * step;
+            u.y += (dy / d) * step;
+            u.sprite.setFlipX(dx < 0);
+          }
+        } else {
+          u.x += dir * cfg.speed * dt;
+        }
+        u.x = Phaser.Math.Clamp(u.x, this.preset.baseMargin - 40, this.preset.worldW - this.preset.baseMargin + 40);
+        u.y = Phaser.Math.Clamp(u.y, 20, this.preset.worldH - 20);
       }
 
       u.sprite.setPosition(u.x, u.y);
@@ -717,6 +830,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.myVillagers?.update(dt, time);
     this.drawMinimap();
+    this.drawSelectionRing();
 
     if (time - this.lastBroadcastAt >= STATE_BROADCAST_MS) {
       this.lastBroadcastAt = time;
