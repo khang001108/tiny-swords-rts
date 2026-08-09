@@ -54,3 +54,32 @@ export const BASE_MAX_HP = 600;
 
 // Kích thước 1 frame trong spritesheet Tiny Swords (đơn vị: px)
 export const FRAME_SIZE = 192;
+
+/** Bố cục animation trong spritesheet: hàng nào là idle/walk/attack, mỗi hàng bao nhiêu frame */
+export interface AnimLayout {
+  cols: number;
+  idleRow: number;
+  walkRow: number;
+  attackRow: number;
+  idleFrames: number;
+  walkFrames: number;
+  attackFrames: number;
+  frameRate: number;
+}
+
+export const UNIT_ANIM: Record<UnitType, AnimLayout> = {
+  pawn: { cols: 6, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 6, frameRate: 9 },
+  warrior: { cols: 6, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 6, frameRate: 9 },
+  archer: { cols: 8, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 8, frameRate: 10 },
+};
+
+function animFrames(row: number, cols: number, count: number) {
+  const start = row * cols;
+  return { start, end: start + count - 1 };
+}
+export function animFrameRange(type: UnitType, kind: "idle" | "walk" | "attack") {
+  const a = UNIT_ANIM[type];
+  const row = kind === "idle" ? a.idleRow : kind === "walk" ? a.walkRow : a.attackRow;
+  const count = kind === "idle" ? a.idleFrames : kind === "walk" ? a.walkFrames : a.attackFrames;
+  return animFrames(row, a.cols, count);
+}

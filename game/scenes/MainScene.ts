@@ -12,6 +12,8 @@ import {
   STARTING_GOLD,
   UNIT_CONFIGS,
   UnitType,
+  animFrameRange,
+  UNIT_ANIM,
 } from "@/game/entities";
 import { gameEvents } from "@/game/events";
 
@@ -27,6 +29,7 @@ const STATE_BROADCAST_MS = 130;
 interface LocalUnit {
   id: string;
   type: UnitType;
+  spriteKey: string;
   sprite: Phaser.GameObjects.Sprite;
   hpBar: Phaser.GameObjects.Graphics;
   x: number;
@@ -34,6 +37,7 @@ interface LocalUnit {
   hp: number;
   maxHp: number;
   state: "walk" | "attack" | "dead";
+  lastAnimState: "walk" | "attack";
   lastAttackAt: number;
 }
 
@@ -45,6 +49,8 @@ interface RemoteUnit {
   hp: number;
   maxHp: number;
   type: UnitType;
+  spriteKey: string;
+  lastAnimState: "walk" | "attack" | "dead";
 }
 
 export default class MainScene extends Phaser.Scene {
@@ -79,10 +85,18 @@ export default class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image("terrain", "/assets/terrain/Tilemap_Flat.png");
+    this.load.image("grass_tile", "/assets/terrain/grass_tile.png");
+    this.load.image("tree_a", "/assets/terrain/tree_a.png");
+    this.load.image("tree_b", "/assets/terrain/tree_b.png");
+    this.load.image("tree_c", "/assets/terrain/tree_c.png");
+    this.load.image("deco_bush", "/assets/terrain/deco/bush.png");
+    this.load.image("deco_bush2", "/assets/terrain/deco/bush2.png");
+    this.load.image("deco_rock", "/assets/terrain/deco/rock.png");
+    this.load.image("deco_mushroom", "/assets/terrain/deco/mushroom.png");
     this.load.image("castle_blue", "/assets/castle/Castle_Blue.png");
     this.load.image("castle_red", "/assets/castle/Castle_Red.png");
     this.load.image("goldmine", "/assets/ui/GoldMine_Active.png");
+    this.load.image("banner", "/assets/ui/Banner_Vertical.png");
 
     this.load.spritesheet("pawn_blue", "/assets/units/Pawn_Blue.png", {
       frameWidth: FRAME_SIZE,
@@ -111,20 +125,13 @@ export default class MainScene extends Phaser.Scene {
   }
 
   create() {
-    this.cameras.main.setBackgroundColor("#3a5f3a");
-    const bg = this.add.tileSprite(0, 0, WORLD_W, WORLD_H, "terrain");
-    bg.setOrigin(0, 0);
-    bg.setAlpha(0.9);
+    this.createAnimations();
+    this.buildMap();
 
-    // Vạch chia lãnh thổ giữa sân
-    const midLine = this.add.graphics();
-    midLine.lineStyle(2, 0xffffff, 0.25);
-    midLine.lineBetween(WORLD_W / 2, 0, WORLD_W / 2, WORLD_H);
-
-    this.myCastle = this.add.image(0, 0, "castle_blue").setScale(0.55);
-    this.enemyCastle = this.add.image(0, 0, "castle_red").setScale(0.55);
-    this.myBaseBar = this.add.graphics();
-    this.enemyBaseBar = this.add.graphics();
+    this.myCastle = this.add.image(0, 0, "castle_blue").setScale(0.55).setDepth(5);
+    this.enemyCastle = this.add.image(0, 0, "castle_red").setScale(0.55).setDepth(5);
+    this.myBaseBar = this.add.graphics().setDepth(6);
+    this.enemyBaseBar = this.add.graphics().setDepth(6);
 
     gameEvents.on("spawn-unit", this.handleSpawnRequest, this);
     gameEvents.on("leave-room", this.handleLeave, this);
@@ -178,6 +185,102 @@ export default class MainScene extends Phaser.Scene {
     // Lật hướng castle địch để nhìn "đối xứng"
     this.enemyCastle.setFlipX(this.mySide === "right");
     this.myCastle.setFlipX(this.mySide === "left");
+
+    // Vùng lãnh thổ mờ dưới chân base (xanh = của mình, đỏ = địch)
+    const territory = this.add.graphics().setDepth(1);
+    territory.fillStyle(0x3b82f6, 0.12);
+    territory.fillEllipse(myX, WORLD_H / 2 + 10, 260, 170);
+    territory.fillStyle(0xef4444, 0.12);
+    territory.fillEllipse(enemyX, WORLD_H / 2 + 10, 260, 170);
+
+    // Bóng đổ dưới base
+    const shadow = this.add.graphics().setDepth(4);
+    shadow.fillStyle(0x000000, 0.25);
+    shadow.fillEllipse(myX, WORLD_H / 2 + 78, 130, 26);
+    shadow.fillEllipse(enemyX, WORLD_H / 2 + 78, 130, 26);
+
+    // Cờ hiệu 2 bên base
+    const myFlag = this.add.image(myX - 95, WORLD_H / 2 - 40, "banner").setScale(0.35).setDepth(5);
+    myFlag.setTint(0x60a5fa);
+    const enemyFlag = this.add.image(enemyX + 95, WORLD_H / 2 - 40, "banner").setScale(0.35).setDepth(5);
+    enemyFlag.setTint(0xf87171);
+
+    // Mỏ vàng trang trí sau base (thể hiện nguồn thu nhập)
+    this.add.image(myX, WORLD_H / 2 + 95, "goldmine").setScale(0.5).setDepth(4);
+    this.add.image(enemyX, WORLD_H / 2 + 95, "goldmine").setScale(0.5).setDepth(4);
+  }
+
+  private createAnimations() {
+    const colors: Array<"blue" | "red"> = ["blue", "red"];
+    const types: UnitType[] = ["pawn", "warrior", "archer"];
+    for (const type of types) {
+      for (const color of colors) {
+        const key = `${type}_${color}`;
+        (["idle", "walk", "attack"] as const).forEach((kind) => {
+          const { start, end } = animFrameRange(type, kind);
+          const animKey = `${key}-${kind}`;
+          if (this.anims.exists(animKey)) return;
+          this.anims.create({
+            key: animKey,
+            frames: this.anims.generateFrameNumbers(key, { start, end }),
+            frameRate: UNIT_ANIM[type].frameRate,
+            repeat: kind === "attack" ? 0 : -1,
+          });
+        });
+      }
+    }
+  }
+
+  private buildMap() {
+    this.cameras.main.setBackgroundColor("#2f4d2a");
+
+    // Nền cỏ dệt (tile lặp lại mượt)
+    const bg = this.add.tileSprite(0, 0, WORLD_W, WORLD_H, "grass_tile").setOrigin(0, 0).setDepth(0);
+    bg.setTileScale(0.9, 0.9);
+
+    // Sân đấu chính — vùng cỏ sáng hơn để phân biệt khu chiến đấu với viền rừng
+    const field = this.add.graphics().setDepth(0);
+    field.fillStyle(0x000000, 0.08);
+    field.fillRect(0, 0, WORLD_W, LANE_Y_MIN - 40);
+    field.fillRect(0, LANE_Y_MAX + 40, WORLD_W, WORLD_H - (LANE_Y_MAX + 40));
+
+    // Vạch chia lãnh thổ giữa sân
+    const midLine = this.add.graphics().setDepth(2);
+    midLine.lineStyle(3, 0xffffff, 0.2);
+    midLine.lineBetween(WORLD_W / 2, 40, WORLD_W / 2, WORLD_H - 40);
+    for (let y = 20; y < WORLD_H - 10; y += 26) {
+      midLine.fillStyle(0xffffff, 0.12);
+      midLine.fillCircle(WORLD_W / 2, y, 3);
+    }
+
+    // Viền rừng cây phía trên & dưới, đóng khung sân đấu cho có chiều sâu
+    const treeKeys = ["tree_a", "tree_b", "tree_c"];
+    const topY = 18;
+    const bottomY = WORLD_H - 8;
+    let i = 0;
+    for (let x = -10; x < WORLD_W + 40; x += 78) {
+      const key = treeKeys[i % treeKeys.length];
+      const jitter = (i % 2 === 0 ? -6 : 6);
+      this.add.image(x, topY + jitter, key).setScale(0.42).setDepth(3).setOrigin(0.5, 0.85);
+      this.add
+        .image(x + 39, bottomY + jitter, key)
+        .setScale(0.42)
+        .setDepth(3)
+        .setFlipY(true)
+        .setOrigin(0.5, 0.15);
+      i++;
+    }
+
+    // Bụi cây / đá / nấm rải rác trang trí ở viền trên dưới (không cản đường quân đi)
+    const decoKeys = ["deco_bush", "deco_bush2", "deco_rock", "deco_mushroom"];
+    const decoPositions = [
+      [180, 165], [340, 178], [520, 160], [720, 172], [900, 158], [1080, 170],
+      [220, 592], [420, 602], [600, 588], [800, 600], [980, 590], [1140, 600],
+    ];
+    decoPositions.forEach(([x, y], idx) => {
+      const key = decoKeys[idx % decoKeys.length];
+      this.add.image(x, y, key).setScale(0.6).setDepth(3).setAlpha(0.9);
+    });
   }
 
   // ── Spawn ──────────────────────────────────────────────────────────
@@ -192,13 +295,17 @@ export default class MainScene extends Phaser.Scene {
     const startX = this.mySide === "left" ? LEFT_BASE_X + 60 : RIGHT_BASE_X - 60;
     const y = Phaser.Math.Between(LANE_Y_MIN, LANE_Y_MAX);
     const spriteKey = `${type}_${this.mySide === "left" ? "blue" : "red"}`;
-    const sprite = this.add.sprite(startX, y, spriteKey, 0).setScale(0.4);
+    const sprite = this.add.sprite(startX, y, spriteKey, 0).setScale(0.4).setDepth(10);
     sprite.setFlipX(this.mySide === "right");
-    const hpBar = this.add.graphics();
+    sprite.play(`${spriteKey}-walk`);
+    sprite.setScale(0);
+    this.tweens.add({ targets: sprite, scale: 0.4, duration: 220, ease: "Back.Out" });
+    const hpBar = this.add.graphics().setDepth(11);
 
     this.localUnits.set(id, {
       id,
       type,
+      spriteKey,
       sprite,
       hpBar,
       x: startX,
@@ -206,6 +313,7 @@ export default class MainScene extends Phaser.Scene {
       hp: cfg.hp,
       maxHp: cfg.hp,
       state: "walk",
+      lastAnimState: "walk",
       lastAttackAt: 0,
     });
   }
@@ -219,16 +327,22 @@ export default class MainScene extends Phaser.Scene {
       let ru = this.remoteUnits.get(u.id);
       if (!ru && u.hp > 0) {
         const spriteKey = `${u.type}_${p.side === "left" ? "blue" : "red"}`;
-        const sprite = this.add.sprite(u.x, this.laneYForRemote(u.id), spriteKey, 0).setScale(0.4);
+        const sprite = this.add.sprite(u.x, this.laneYForRemote(u.id), spriteKey, 0).setScale(0.4).setDepth(10);
         sprite.setFlipX(p.side === "right");
-        const hpBar = this.add.graphics();
-        ru = { sprite, hpBar, targetX: u.x, y: sprite.y, hp: u.hp, maxHp: u.maxHp, type: u.type };
+        sprite.play(`${spriteKey}-walk`);
+        const hpBar = this.add.graphics().setDepth(11);
+        ru = { sprite, hpBar, targetX: u.x, y: sprite.y, hp: u.hp, maxHp: u.maxHp, type: u.type, spriteKey, lastAnimState: "walk" };
         this.remoteUnits.set(u.id, ru);
       }
       if (ru) {
         ru.targetX = u.x;
         ru.hp = u.hp;
         ru.maxHp = u.maxHp;
+        if (u.state !== ru.lastAnimState) {
+          ru.lastAnimState = u.state;
+          if (u.state === "attack") ru.sprite.play(`${ru.spriteKey}-attack`);
+          else if (u.state === "walk") ru.sprite.play(`${ru.spriteKey}-walk`, true);
+        }
         if (u.hp <= 0) this.destroyRemoteUnit(u.id);
       }
     }
@@ -304,23 +418,31 @@ export default class MainScene extends Phaser.Scene {
 
       if (canHitUnit || canHitBase) {
         u.state = "attack";
+        if (u.lastAnimState !== "attack") {
+          u.lastAnimState = "attack";
+          u.sprite.play(`${u.spriteKey}-attack`);
+        }
         if (time - u.lastAttackAt >= cfg.attackCooldownMs) {
           u.lastAttackAt = time;
+          u.sprite.play(`${u.spriteKey}-attack`);
           if (canHitUnit && nearestId) {
             this.sync.sendHit(nearestId, cfg.damage);
           } else if (canHitBase) {
             this.sync.sendHit("base", cfg.damage);
           }
-          u.sprite.setScale(0.46);
-          this.time.delayedCall(100, () => u.sprite.setScale(0.4));
         }
       } else {
         u.state = "walk";
+        if (u.lastAnimState !== "walk") {
+          u.lastAnimState = "walk";
+          u.sprite.play(`${u.spriteKey}-walk`, true);
+        }
         u.x += dir * cfg.speed * dt;
         u.x = Phaser.Math.Clamp(u.x, LEFT_BASE_X, RIGHT_BASE_X);
       }
 
       u.sprite.setPosition(u.x, u.y);
+      u.sprite.setDepth(10 + u.y / 1000);
       this.drawHpBar(u.hpBar, u.x, u.y - 34, u.hp, u.maxHp, 30);
     }
 
