@@ -24,6 +24,12 @@ export interface PauseState {
   paused: boolean;
 }
 
+export type BuildingRole = "castle" | "barracks" | "tower" | "house1" | "monastery";
+
+export interface BuildingSelection {
+  role: BuildingRole;
+}
+
 export interface GameEndUpdate {
   youWin: boolean;
 }

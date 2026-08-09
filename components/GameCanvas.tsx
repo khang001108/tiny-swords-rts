@@ -2,9 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
-import { gameEvents, HudUpdate, GameEndUpdate, PauseState } from "@/game/events";
+import { gameEvents, HudUpdate, GameEndUpdate, PauseState, BuildingSelection, BuildingRole } from "@/game/events";
 import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST, HOUSE_COST } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
+
+const BUILDING_LABEL: Record<BuildingRole, string> = {
+  castle: "🏰 Lâu đài",
+  barracks: "⚔️ Doanh trại",
+  tower: "🗼 Tháp canh",
+  house1: "🏠 Nhà dân",
+  monastery: "⛪ Tu viện",
+};
 
 export default function GameCanvas({
   roomCode,
@@ -36,6 +44,7 @@ export default function GameCanvas({
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
   const [paused, setPaused] = useState(false);
+  const [buildingRole, setBuildingRole] = useState<BuildingRole>("castle");
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -44,14 +53,17 @@ export default function GameCanvas({
     const onHud = (p: HudUpdate) => setHud(p);
     const onEnd = (p: GameEndUpdate) => setResult(p);
     const onPause = (p: PauseState) => setPaused(p.paused);
+    const onBuilding = (p: BuildingSelection) => setBuildingRole(p.role);
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
     gameEvents.on("pause-state", onPause);
+    gameEvents.on("select-building", onBuilding);
 
     return () => {
       gameEvents.off("hud-update", onHud);
       gameEvents.off("game-end", onEnd);
       gameEvents.off("pause-state", onPause);
+      gameEvents.off("select-building", onBuilding);
       gameEvents.emit("leave-room");
       game.destroy(true);
     };
@@ -165,52 +177,68 @@ export default function GameCanvas({
         )}
       </div>
 
-      <div className="flex gap-2 mt-3 px-1 flex-wrap items-center">
-        {(Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
-          const cfg = UNIT_CONFIGS[type];
-          const atCap = hud.myUnits >= hud.popCap;
-          const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
-          return (
-            <button
-              key={type}
-              onClick={() => spawn(type)}
-              disabled={disabled}
-              className={`h-14 min-w-[130px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
-            >
-              <NineSlice prefix="btn-blue" className="w-full h-full">
-                <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                  {cfg.label}
-                  <span className="inline-flex items-center text-xs opacity-90">
-                    <img src={icon("gold")} className="icon-inline" alt="" />
-                    {cfg.cost}
+      <div className="flex items-center gap-2 mt-3 px-1">
+        <span className="text-xs text-white/60 flex items-center gap-1">
+          Đang chọn: <span className="font-semibold text-white/90">{BUILDING_LABEL[buildingRole]}</span>
+        </span>
+      </div>
+
+      <div className="flex gap-2 mt-1.5 px-1 flex-wrap items-center">
+        {(buildingRole === "castle" || buildingRole === "barracks") &&
+          (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
+            const cfg = UNIT_CONFIGS[type];
+            const atCap = hud.myUnits >= hud.popCap;
+            const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
+            return (
+              <button
+                key={type}
+                onClick={() => spawn(type)}
+                disabled={disabled}
+                className={`h-14 min-w-[130px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
+              >
+                <NineSlice prefix="btn-blue" className="w-full h-full">
+                  <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                    {cfg.label}
+                    <span className="inline-flex items-center text-xs opacity-90">
+                      <img src={icon("gold")} className="icon-inline" alt="" />
+                      {cfg.cost}
+                    </span>
                   </span>
+                </NineSlice>
+              </button>
+            );
+          })}
+
+        {buildingRole === "house1" && (
+          <button
+            onClick={spawnVillager}
+            disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
+            className={`h-14 min-w-[140px] transition ${
+              hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
+                ? "opacity-40 grayscale"
+                : "active:scale-[0.97]"
+            }`}
+          >
+            <NineSlice prefix="btn-red" className="w-full h-full">
+              <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                + Dân
+                <span className="inline-flex items-center text-xs opacity-90">
+                  <img src={icon("gold")} className="icon-inline" alt="" />
+                  {VILLAGER_COST}
                 </span>
-              </NineSlice>
-            </button>
-          );
-        })}
+              </span>
+            </NineSlice>
+          </button>
+        )}
+
+        {buildingRole === "tower" && (
+          <p className="text-xs text-white/50 py-2">Tháp canh tự động bắn quân địch trong tầm — không sản xuất được.</p>
+        )}
+        {buildingRole === "monastery" && (
+          <p className="text-xs text-white/50 py-2">Tu viện — công trình trang trí, chưa có chức năng sản xuất.</p>
+        )}
 
         <div className="w-px h-10 bg-white/15 mx-1" />
-
-        <button
-          onClick={spawnVillager}
-          disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
-          className={`h-14 min-w-[120px] transition ${
-            hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
-              ? "opacity-40 grayscale"
-              : "active:scale-[0.97]"
-          }`}
-        >
-          <NineSlice prefix="btn-red" className="w-full h-full">
-            <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-              + Dân
-              <span className="inline-flex items-center text-xs opacity-90">
-                <img src={icon("gold")} className="icon-inline" alt="" />
-                {VILLAGER_COST}
-              </span>
-            </span>
-          </NineSlice>
-        </button>
 
         <button
           onClick={buildHouse}
@@ -238,7 +266,8 @@ export default function GameCanvas({
         </p>
       )}
       <p className="text-xs text-white/40 mt-1 px-1">
-        💡 Bấm vào lính/dân của bạn để chọn, rồi bấm vào nơi muốn tới (hoặc quân địch để đánh, hoặc mỏ khác để đổi việc cho dân).
+        💡 Bấm vào 1 công trình của bạn (Lâu đài/Doanh trại/Nhà dân) để chọn nơi sản xuất — nút bên dưới sẽ đổi theo. Bấm
+        lính/dân rồi bấm nơi muốn tới để ra lệnh.
       </p>
     </div>
   );

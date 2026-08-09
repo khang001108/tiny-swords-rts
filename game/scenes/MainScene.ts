@@ -106,6 +106,8 @@ export default class MainScene extends Phaser.Scene {
 
   private selected: { kind: "unit" | "villager"; id: string } | null = null;
   private selectionRing!: Phaser.GameObjects.Graphics;
+  private buildingRing!: Phaser.GameObjects.Graphics;
+  private selectedBuildingPos: { x: number; y: number } | null = null;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
   private riverBand: { xMin: number; xMax: number } | null = null;
@@ -229,6 +231,9 @@ export default class MainScene extends Phaser.Scene {
     this.enemyCastle = this.add.image(0, 0, "castle_red").setScale(0.5).setDepth(5);
     this.enemyCastle.setInteractive({ cursor: "pointer" });
     this.enemyCastle.setData("kind", "enemy");
+    this.myCastle.setInteractive({ cursor: "pointer" });
+    this.myCastle.setData("kind", "my-building");
+    this.myCastle.setData("role", "castle");
     this.myBaseBar = this.add.graphics().setDepth(6);
     this.enemyBaseBar = this.add.graphics().setDepth(6);
 
@@ -249,6 +254,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.minimapG = this.add.graphics().setDepth(100).setScrollFactor(0);
     this.selectionRing = this.add.graphics().setDepth(12);
+    this.buildingRing = this.add.graphics().setDepth(12);
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off("pointerdown", this.handlePointerDown, this);
@@ -341,8 +347,11 @@ export default class MainScene extends Phaser.Scene {
       const myBx = myX + dirMine * visual.offsetX;
       const enemyBx = enemyX + dirEnemy * visual.offsetX;
       const by = midY + visual.offsetY;
-      this.add.image(myBx, by, `bld_${b}_blue`).setScale(visual.scale).setDepth(4);
+      const myImg = this.add.image(myBx, by, `bld_${b}_blue`).setScale(visual.scale).setDepth(4);
       this.add.image(enemyBx, by, `bld_${b}_red`).setScale(visual.scale).setDepth(4);
+      myImg.setInteractive({ cursor: "pointer" });
+      myImg.setData("kind", "my-building");
+      myImg.setData("role", b);
 
       if (b === "tower") {
         this.myTowerPos = { x: myBx, y: by };
@@ -644,10 +653,12 @@ export default class MainScene extends Phaser.Scene {
       const kind = hit.getData("kind");
       if (kind === "my-unit") {
         this.selected = { kind: "unit", id: hit.getData("unitId") };
+        this.selectedBuildingPos = null;
         return;
       }
       if (kind === "my-villager") {
         this.selected = { kind: "villager", id: hit.getData("villagerId") };
+        this.selectedBuildingPos = null;
         return;
       }
       if (kind === "resource" && this.selected?.kind === "villager") {
@@ -657,6 +668,12 @@ export default class MainScene extends Phaser.Scene {
       if (kind === "enemy" && this.selected) {
         const obj = hit as unknown as { x: number; y: number };
         this.issueMoveCommand(obj.x, obj.y);
+        return;
+      }
+      if (kind === "my-building" && !this.selected) {
+        const obj = hit as unknown as { x: number; y: number };
+        this.selectedBuildingPos = { x: obj.x, y: obj.y };
+        gameEvents.emit("select-building", { role: hit.getData("role") });
         return;
       }
     }
@@ -680,6 +697,17 @@ export default class MainScene extends Phaser.Scene {
 
   private drawSelectionRing() {
     this.selectionRing.clear();
+    this.buildingRing.clear();
+    if (this.selectedBuildingPos) {
+      this.buildingRing.lineStyle(2, 0xfacc15, 0.9);
+      this.buildingRing.strokeRoundedRect(
+        this.selectedBuildingPos.x - 40,
+        this.selectedBuildingPos.y - 40,
+        80,
+        80,
+        8
+      );
+    }
     if (!this.selected) return;
     let pos: { x: number; y: number } | null = null;
     if (this.selected.kind === "unit") {
@@ -715,6 +743,9 @@ export default class MainScene extends Phaser.Scene {
     const hy = this.myBasePos.y + slot.offsetY;
     const color = this.mySide === "left" ? "blue" : "red";
     const img = this.add.image(hx, hy, `bld_house1_${color}`).setScale(0).setDepth(4);
+    img.setInteractive({ cursor: "pointer" });
+    img.setData("kind", "my-building");
+    img.setData("role", "house1");
     this.tweens.add({ targets: img, scale: 0.4, duration: 260, ease: "Back.Out" });
     this.housesBuilt++;
     this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
