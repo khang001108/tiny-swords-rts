@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { randomRoomCode } from "@/game/net";
 import { MAP_PRESETS, MapSize } from "@/game/entities";
+import NineSlice from "@/components/NineSlice";
 
-type Step = "mode" | "bot-map" | "online-choice" | "online-map" | "online-join";
+type Step = "mode" | "bot-map" | "online-choice" | "online-map";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -29,74 +30,68 @@ export default function LobbyPage() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-4">
-      <h1 className="text-4xl font-extrabold mb-1 text-center">⚔️ Tiny Swords RTS</h1>
-      <p className="text-white/60 mb-8 text-center">Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time</p>
+      <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-20 h-20 object-contain mb-1 drop-shadow-lg" />
+      <h1 className="text-4xl font-extrabold mb-1 text-center tracking-wide" style={{ textShadow: "2px 2px 0 rgba(0,0,0,0.4)" }}>
+        Tiny Swords RTS
+      </h1>
+      <p className="text-white/60 mb-6 text-center text-sm">
+        Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time
+      </p>
 
-      <div className="w-full max-w-sm space-y-4">
-        {step === "mode" && (
-          <>
-            <button
-              onClick={() => setStep("bot-map")}
-              className="w-full py-3 rounded-lg bg-sky-500 hover:bg-sky-400 text-black font-bold text-lg transition"
-            >
-              🤖 Chơi với Bot
-            </button>
-            <button
-              onClick={() => setStep("online-choice")}
-              className="w-full py-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-lg transition"
-            >
-              🧑‍🤝‍🧑 Chơi với người
-            </button>
-          </>
-        )}
-
-        {step === "bot-map" && (
-          <MapPicker onBack={() => setStep("mode")} onPick={startBot} />
-        )}
-
-        {step === "online-choice" && (
-          <>
-            <button
-              onClick={() => setStep("online-map")}
-              className="w-full py-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-lg transition"
-            >
-              Tạo phòng mới
-            </button>
-
-            <div className="flex items-center gap-2 text-white/40 text-sm">
-              <div className="flex-1 h-px bg-white/10" />
-              hoặc
-              <div className="flex-1 h-px bg-white/10" />
+      <NineSlice prefix="paper" className="w-full max-w-sm" style={{ minHeight: 0 }}>
+        <div className="w-full px-6 py-7 text-[#3a2c1a]">
+          {step === "mode" && (
+            <div className="space-y-4">
+              <BigButton color="blue" onClick={() => setStep("bot-map")}>
+                🤖 Chơi với Bot
+              </BigButton>
+              <BigButton color="red" onClick={() => setStep("online-choice")}>
+                🧑‍🤝‍🧑 Chơi với người
+              </BigButton>
             </div>
+          )}
 
-            <div className="flex gap-2">
-              <input
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
-                placeholder="Nhập mã phòng"
-                maxLength={6}
-                className="flex-1 px-3 py-3 rounded-lg bg-white/10 border border-white/20 outline-none uppercase tracking-widest text-center font-mono"
-              />
-              <button
-                onClick={joinRoom}
-                className="px-5 py-3 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 font-semibold"
-              >
-                Vào
+          {step === "bot-map" && <MapPicker onBack={() => setStep("mode")} onPick={startBot} />}
+
+          {step === "online-choice" && (
+            <div className="space-y-4">
+              <BigButton color="blue" onClick={() => setStep("online-map")}>
+                Tạo phòng mới
+              </BigButton>
+
+              <div className="flex items-center gap-2 text-[#3a2c1a]/40 text-sm">
+                <div className="flex-1 h-px bg-[#3a2c1a]/20" />
+                hoặc
+                <div className="flex-1 h-px bg-[#3a2c1a]/20" />
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  placeholder="Nhập mã phòng"
+                  maxLength={6}
+                  className="flex-1 px-3 py-3 rounded-lg bg-black/5 border border-[#3a2c1a]/30 outline-none uppercase tracking-widest text-center font-mono text-[#3a2c1a] placeholder:text-[#3a2c1a]/40"
+                />
+                <button
+                  onClick={joinRoom}
+                  className="px-5 py-3 rounded-lg bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 font-semibold"
+                >
+                  Vào
+                </button>
+              </div>
+              <button onClick={() => setStep("mode")} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a]">
+                ← Quay lại
               </button>
             </div>
-            <button onClick={() => setStep("mode")} className="text-white/40 text-sm hover:text-white/70">
-              ← Quay lại
-            </button>
-          </>
-        )}
+          )}
 
-        {step === "online-map" && (
-          <MapPicker onBack={() => setStep("online-choice")} onPick={createOnlineRoom} />
-        )}
-      </div>
+          {step === "online-map" && <MapPicker onBack={() => setStep("online-choice")} onPick={createOnlineRoom} />}
+        </div>
+      </NineSlice>
 
       {step === "mode" && (
-        <p className="text-white/30 text-xs mt-10 max-w-md text-center">
+        <p className="text-white/30 text-xs mt-6 max-w-md text-center">
           Chơi với Bot để luyện tập một mình, hoặc tạo phòng rồi gửi mã cho bạn bè để đấu real-time.
         </p>
       )}
@@ -104,27 +99,48 @@ export default function LobbyPage() {
   );
 }
 
+function BigButton({
+  color,
+  onClick,
+  children,
+}: {
+  color: "blue" | "red";
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick} className="w-full h-16 block active:scale-[0.98] transition-transform">
+      <NineSlice prefix={color === "blue" ? "btn-blue" : "btn-red"} className="w-full h-full">
+        <span className="font-bold text-white text-lg drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">{children}</span>
+      </NineSlice>
+    </button>
+  );
+}
+
 function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize) => void }) {
   const sizes: MapSize[] = ["small", "medium", "large"];
   return (
     <div className="space-y-3">
-      <p className="text-white/60 text-sm text-center mb-1">Chọn kích thước bản đồ</p>
+      <p className="text-[#3a2c1a]/70 text-sm text-center mb-1 flex items-center justify-center gap-1">
+        <img src="/assets/ui9/icon-hammer.png" className="icon-inline" alt="" />
+        Chọn kích thước bản đồ
+      </p>
       {sizes.map((s) => {
         const p = MAP_PRESETS[s];
         return (
           <button
             key={s}
             onClick={() => onPick(s)}
-            className="w-full py-3 px-4 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-left transition"
+            className="w-full py-3 px-4 rounded-lg bg-black/5 hover:bg-black/10 border border-[#3a2c1a]/25 text-left transition"
           >
-            <div className="font-bold">
-              {p.label} <span className="text-white/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
+            <div className="font-bold text-[#3a2c1a]">
+              {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
             </div>
-            <div className="text-white/50 text-xs">{p.desc}</div>
+            <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
           </button>
         );
       })}
-      <button onClick={onBack} className="text-white/40 text-sm hover:text-white/70">
+      <button onClick={onBack} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a]">
         ← Quay lại
       </button>
     </div>
