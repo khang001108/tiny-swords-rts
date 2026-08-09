@@ -28,11 +28,11 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
     key: "warrior",
     label: "Chiến binh",
     cost: 45,
-    hp: 140,
-    damage: 14,
+    hp: 150,
+    damage: 15,
     speed: 38,
     range: 30,
-    attackCooldownMs: 1100,
+    attackCooldownMs: 1000,
     spriteFrame: 0,
   },
   archer: {
@@ -49,7 +49,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
 };
 
 export const STARTING_GOLD = 60;
-export const GOLD_INCOME_PER_SEC = 4;
+export const GOLD_INCOME_PER_SEC = 1;
 export const BASE_MAX_HP = 600;
 
 // Kích thước 1 frame trong spritesheet Tiny Swords (đơn vị: px)
@@ -164,4 +164,69 @@ export function animFrameRange(type: UnitType, kind: "idle" | "walk" | "attack")
   const row = kind === "idle" ? a.idleRow : kind === "walk" ? a.walkRow : a.attackRow;
   const count = kind === "idle" ? a.idleFrames : kind === "walk" ? a.walkFrames : a.attackFrames;
   return animFrames(row, a.cols, count);
+}
+
+// ── Lính nâng cấp (Warrior/Archer dùng bộ sprite mới, mỗi hành động 1 file riêng) ──
+// "pawn" vẫn dùng spritesheet cũ (1 file nhiều hàng) nên giữ nguyên animFrameRange ở trên.
+export type SpriteMode = "sheet" | "perAction";
+
+export const UNIT_SPRITE_MODE: Record<UnitType, SpriteMode> = {
+  pawn: "sheet",
+  warrior: "perAction",
+  archer: "perAction",
+};
+
+export const UNIT_PERACTION_FRAMES: Partial<Record<UnitType, { idle: number; walk: number; attack: number }>> = {
+  warrior: { idle: 8, walk: 6, attack: 4 },
+  archer: { idle: 6, walk: 4, attack: 8 },
+};
+
+// ── Dân (villager) — đi khai thác Gỗ / Vàng / Thịt ──────────────────────
+export type ResourceKind = "wood" | "gold" | "meat";
+
+export const RESOURCE_LABEL: Record<ResourceKind, string> = {
+  wood: "Gỗ",
+  gold: "Vàng",
+  meat: "Thịt",
+};
+
+export const VILLAGER_HP = 35;
+export const VILLAGER_SPEED = 55;
+export const VILLAGER_GATHER_MS = 2200; // thời gian đứng khai thác mỗi lượt
+export const VILLAGER_CARRY_AMOUNT: Record<ResourceKind, number> = {
+  wood: 12,
+  gold: 18,
+  meat: 12,
+};
+export const VILLAGER_COST = 20;
+export const VILLAGER_MAX_COUNT = 6;
+export const VILLAGER_ARRIVE_DIST = 20;
+
+export const VILLAGER_PERACTION_FRAMES: Record<ResourceKind, { run: number; interact: number; carry: number }> = {
+  wood: { run: 6, interact: 6, carry: 6 },
+  gold: { run: 6, interact: 6, carry: 6 },
+  meat: { run: 6, interact: 4, carry: 6 },
+};
+export const VILLAGER_IDLE_FRAMES = 8;
+
+/** Vị trí (lệch so với base, cùng quy ước offset như BUILDING_VISUALS) của các mỏ tài nguyên quanh căn cứ */
+export interface ResourceNodeSpec {
+  kind: ResourceKind;
+  offsetX: number;
+  offsetY: number;
+}
+
+export const RESOURCE_NODE_LAYOUT: ResourceNodeSpec[] = [
+  { kind: "wood", offsetX: -130, offsetY: -25 },
+  { kind: "gold", offsetX: 95, offsetY: 100 },
+  { kind: "meat", offsetX: -110, offsetY: 115 },
+];
+
+/** Mỗi 50 Gỗ+Thịt tích lũy được +1 giới hạn quân số, tối đa cộng thêm chừng này */
+export const RESOURCE_CAP_UNIT = 50;
+export const RESOURCE_CAP_MAX_BONUS = 6;
+
+export function computePopCap(buildingsCount: number, wood: number, meat: number): number {
+  const bonus = Math.min(RESOURCE_CAP_MAX_BONUS, Math.floor((wood + meat) / RESOURCE_CAP_UNIT));
+  return BASE_POP_CAP + buildingsCount * POP_CAP_PER_BUILDING + bonus;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
 import { gameEvents, HudUpdate, GameEndUpdate } from "@/game/events";
-import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS } from "@/game/entities";
+import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 export default function GameCanvas({
@@ -20,6 +20,8 @@ export default function GameCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudUpdate>({
     gold: 0,
+    wood: 0,
+    meat: 0,
     myBaseHp: 1,
     myBaseMaxHp: 1,
     enemyBaseHp: 1,
@@ -27,6 +29,8 @@ export default function GameCanvas({
     opponentConnected: false,
     myUnits: 0,
     popCap: 6,
+    villagers: 0,
+    villagerMax: 6,
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
 
@@ -49,12 +53,13 @@ export default function GameCanvas({
   }, [roomCode, isHost, mode, mapSize]);
 
   const spawn = (type: UnitType) => gameEvents.emit("spawn-unit", type);
+  const spawnVillager = () => gameEvents.emit("spawn-villager");
   const preset = MAP_PRESETS[mapSize];
   const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
 
   return (
     <div className="w-full mx-auto" style={{ maxWidth: preset.worldW }}>
-      <div className="rounded-lg bg-[#e9dcbb]/95 border border-black/20 shadow-md mb-2 px-3 py-1.5 flex items-center justify-between text-sm text-[#3a2c1a] flex-wrap gap-1">
+      <div className="rounded-lg bg-[#e9dcbb]/95 border border-black/20 shadow-md mb-2 px-3 py-1.5 flex items-center justify-between text-sm text-[#3a2c1a] flex-wrap gap-x-3 gap-y-1">
         {mode === "online" ? (
           <span>
             Phòng: <span className="font-mono font-bold">{roomCode}</span>
@@ -73,9 +78,21 @@ export default function GameCanvas({
           <img src={icon("swords")} className="icon-inline" alt="" />
           {hud.myUnits}/{hud.popCap}
         </span>
+        <span className="flex items-center font-medium">
+          <img src={icon("hammer")} className="icon-inline" alt="" />
+          Dân {hud.villagers}/{hud.villagerMax}
+        </span>
         <span className="flex items-center font-bold text-amber-700">
           <img src={icon("gold")} className="icon-inline" alt="" />
           {hud.gold}
+        </span>
+        <span className="flex items-center font-bold text-lime-800">
+          <img src={icon("wood")} className="icon-inline" alt="" />
+          {hud.wood}
+        </span>
+        <span className="flex items-center font-bold text-rose-800">
+          <img src={icon("meat")} className="icon-inline" alt="" />
+          {hud.meat}
         </span>
       </div>
 
@@ -112,7 +129,7 @@ export default function GameCanvas({
         )}
       </div>
 
-      <div className="flex gap-2 mt-3 px-1 flex-wrap">
+      <div className="flex gap-2 mt-3 px-1 flex-wrap items-center">
         {(Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
           const cfg = UNIT_CONFIGS[type];
           const atCap = hud.myUnits >= hud.popCap;
@@ -136,10 +153,32 @@ export default function GameCanvas({
             </button>
           );
         })}
+
+        <div className="w-px h-10 bg-white/15 mx-1" />
+
+        <button
+          onClick={spawnVillager}
+          disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
+          className={`h-14 min-w-[130px] transition ${
+            hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
+              ? "opacity-40 grayscale"
+              : "active:scale-[0.97]"
+          }`}
+        >
+          <NineSlice prefix="btn-red" className="w-full h-full">
+            <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+              + Dân
+              <span className="inline-flex items-center text-xs opacity-90">
+                <img src={icon("gold")} className="icon-inline" alt="" />
+                {VILLAGER_COST}
+              </span>
+            </span>
+          </NineSlice>
+        </button>
       </div>
       {hud.myUnits >= hud.popCap && (
         <p className="text-xs text-amber-400/80 mt-1 px-1">
-          Đã đạt giới hạn quân số — xây thêm doanh trại (bản đồ lớn hơn) để tăng giới hạn, hoặc chờ quân hiện tại giao chiến.
+          Đã đạt giới hạn quân số — cho dân khai thác thêm Gỗ/Thịt hoặc xây thêm công trình (bản đồ lớn hơn) để tăng giới hạn.
         </p>
       )}
     </div>

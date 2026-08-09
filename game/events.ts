@@ -5,6 +5,8 @@ export const gameEvents = new Phaser.Events.EventEmitter();
 
 export interface HudUpdate {
   gold: number;
+  wood: number;
+  meat: number;
   myBaseHp: number;
   myBaseMaxHp: number;
   enemyBaseHp: number;
@@ -12,6 +14,8 @@ export interface HudUpdate {
   opponentConnected: boolean;
   myUnits: number;
   popCap: number;
+  villagers: number;
+  villagerMax: number;
 }
 
 export interface GameEndUpdate {

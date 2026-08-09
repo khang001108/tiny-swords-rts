@@ -119,7 +119,9 @@ export class BotOpponent implements OpponentLink {
     this.tickTimer = setInterval(() => this.tick(), 110);
     this.spawnTimer = setInterval(() => this.maybeSpawn(), spawnEveryMs);
     this.goldTimer = setInterval(() => {
-      this.gold += GOLD_INCOME_PER_SEC;
+      // Bot không có dân đi khai thác, nên bù thêm để kinh tế cân bằng với người chơi
+      // (người chơi có dân mỏ vàng mang về ngoài thu nhập thụ động).
+      this.gold += GOLD_INCOME_PER_SEC + 3;
     }, 1000);
   }
 

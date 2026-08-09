@@ -9,24 +9,30 @@ import {
 import { BotOpponent } from "@/game/opponent";
 import {
   BASE_MAX_HP,
-  BASE_POP_CAP,
   BUILDING_VISUALS,
   FRAME_SIZE,
   GOLD_INCOME_PER_SEC,
   MAP_PRESETS,
   MapPreset,
   MapSize,
-  POP_CAP_PER_BUILDING,
+  computePopCap,
+  RESOURCE_NODE_LAYOUT,
+  ResourceKind,
   STARTING_GOLD,
   TOWER_COOLDOWN_MS,
   TOWER_DAMAGE,
   TOWER_RANGE,
   UNIT_CONFIGS,
+  UNIT_PERACTION_FRAMES,
+  UNIT_SPRITE_MODE,
   UnitType,
+  VILLAGER_COST,
+  VILLAGER_MAX_COUNT,
   animFrameRange,
   UNIT_ANIM,
 } from "@/game/entities";
 import { gameEvents } from "@/game/events";
+import { NodePositions, VillagerSystem, createVillagerAnimations } from "@/game/villager";
 
 const BASE_HIT_RADIUS = 70;
 const STATE_BROADCAST_MS = 130;
@@ -70,9 +76,13 @@ export default class MainScene extends Phaser.Scene {
   private gameOver = false;
 
   private gold = STARTING_GOLD;
+  private wood = 0;
+  private meat = 0;
   private myBaseHp = BASE_MAX_HP;
   private enemyBaseHp = BASE_MAX_HP;
-  private popCap = BASE_POP_CAP;
+  private popCap = 6;
+
+  private myVillagers: VillagerSystem | null = null;
 
   private myCastle!: Phaser.GameObjects.Image;
   private enemyCastle!: Phaser.GameObjects.Image;
@@ -96,7 +106,7 @@ export default class MainScene extends Phaser.Scene {
     this.isHost = data.isHost;
     this.mode = data.mode;
     this.preset = MAP_PRESETS[data.mapSize] ?? MAP_PRESETS.medium;
-    this.popCap = BASE_POP_CAP + this.preset.buildings.length * POP_CAP_PER_BUILDING;
+    this.popCap = computePopCap(this.preset.buildings.length, 0, 0);
   }
 
   preload() {
@@ -128,22 +138,61 @@ export default class MainScene extends Phaser.Scene {
       frameWidth: FRAME_SIZE,
       frameHeight: FRAME_SIZE,
     });
-    this.load.spritesheet("warrior_blue", "/assets/units/Warrior_Blue.png", {
-      frameWidth: FRAME_SIZE,
-      frameHeight: FRAME_SIZE,
-    });
-    this.load.spritesheet("warrior_red", "/assets/units/Warrior_Red.png", {
-      frameWidth: FRAME_SIZE,
-      frameHeight: FRAME_SIZE,
-    });
-    this.load.spritesheet("archer_blue", "/assets/units/Archer_Blue.png", {
-      frameWidth: FRAME_SIZE,
-      frameHeight: FRAME_SIZE,
-    });
-    this.load.spritesheet("archer_red", "/assets/units/Archer_Red.png", {
-      frameWidth: FRAME_SIZE,
-      frameHeight: FRAME_SIZE,
-    });
+
+    // Lính nâng cấp (Warrior/Archer) — mỗi hành động là 1 file riêng (bộ sprite mới)
+    const perActionColors: Array<"blue" | "red"> = ["blue", "red"];
+    for (const color of perActionColors) {
+      this.load.spritesheet(`warrior_${color}_idle`, `/assets/units2/warrior_${color}_idle.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`warrior_${color}_run`, `/assets/units2/warrior_${color}_run.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`warrior_${color}_attack`, `/assets/units2/warrior_${color}_attack.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`archer_${color}_idle`, `/assets/units2/archer_${color}_idle.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`archer_${color}_run`, `/assets/units2/archer_${color}_run.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`archer_${color}_attack`, `/assets/units2/archer_${color}_attack.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+
+      // Dân (villager) — chạy tay không theo dụng cụ, khai thác, rồi chạy về mang tài nguyên
+      this.load.spritesheet(`vill_${color}_idle`, `/assets/villager/${color}_idle.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      (["wood", "gold", "meat"] as ResourceKind[]).forEach((kind) => {
+        this.load.spritesheet(`vill_${color}_run_${kind}`, `/assets/villager/${color}_run_${kind}.png`, {
+          frameWidth: FRAME_SIZE,
+          frameHeight: FRAME_SIZE,
+        });
+        this.load.spritesheet(`vill_${color}_interact_${kind}`, `/assets/villager/${color}_interact_${kind}.png`, {
+          frameWidth: FRAME_SIZE,
+          frameHeight: FRAME_SIZE,
+        });
+        this.load.spritesheet(`vill_${color}_carry_${kind}`, `/assets/villager/${color}_carry_${kind}.png`, {
+          frameWidth: FRAME_SIZE,
+          frameHeight: FRAME_SIZE,
+        });
+      });
+    }
+
+    // Mỏ tài nguyên
+    this.load.image("res_gold", "/assets/resources/gold_node.png");
+    this.load.spritesheet("res_tree1", "/assets/resources/tree1_sheet.png", { frameWidth: 192, frameHeight: 256 });
+    this.load.spritesheet("res_tree2", "/assets/resources/tree2_sheet.png", { frameWidth: 192, frameHeight: 256 });
+    this.load.spritesheet("res_sheep", "/assets/resources/sheep_sheet.png", { frameWidth: 128, frameHeight: 128 });
   }
 
   create() {
@@ -156,11 +205,14 @@ export default class MainScene extends Phaser.Scene {
     this.enemyBaseBar = this.add.graphics().setDepth(6);
 
     gameEvents.on("spawn-unit", this.handleSpawnRequest, this);
+    gameEvents.on("spawn-villager", this.handleSpawnVillager, this);
     gameEvents.on("leave-room", this.handleLeave, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       gameEvents.off("spawn-unit", this.handleSpawnRequest, this);
+      gameEvents.off("spawn-villager", this.handleSpawnVillager, this);
       gameEvents.off("leave-room", this.handleLeave, this);
       this.sync?.disconnect();
+      this.myVillagers?.destroy();
     });
 
     this.connectRoom();
@@ -249,6 +301,44 @@ export default class MainScene extends Phaser.Scene {
         this.myTowerPos = { x: myBx, y: by };
       }
     }
+
+    // Mỏ tài nguyên quanh base của MÌNH — dân sẽ đi khai thác ở đây
+    const myNodePos: NodePositions = { wood: { x: 0, y: 0 }, gold: { x: 0, y: 0 }, meat: { x: 0, y: 0 } };
+    for (const spec of RESOURCE_NODE_LAYOUT) {
+      const nx = myX + dirMine * spec.offsetX;
+      const ny = midY + spec.offsetY;
+      myNodePos[spec.kind] = { x: nx, y: ny };
+      if (spec.kind === "gold") {
+        this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(4);
+      } else if (spec.kind === "wood") {
+        this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(4).play("res_tree1-sway");
+        this.add.sprite(nx + 20, ny + 10, "res_tree2", 0).setScale(0.36).setDepth(4);
+      } else {
+        this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(4).play("res_sheep-idle");
+        this.add.sprite(nx + 18, ny + 8, "res_sheep", 0).setScale(0.5).setDepth(4).play("res_sheep-idle");
+      }
+    }
+
+    this.myVillagers = new VillagerSystem(
+      this,
+      this.mySide === "left" ? "blue" : "red",
+      { x: myX, y: midY },
+      myNodePos,
+      (kind, amount) => this.handleVillagerDeposit(kind, amount)
+    );
+    (["wood", "gold", "meat"] as const).forEach((k) => this.myVillagers!.addVillager(k));
+  }
+
+  private handleVillagerDeposit(kind: ResourceKind, amount: number) {
+    if (kind === "gold") this.gold += amount;
+    else if (kind === "wood") this.wood += amount;
+    else this.meat += amount;
+    this.recomputePopCap();
+    this.emitHud();
+  }
+
+  private recomputePopCap() {
+    this.popCap = computePopCap(this.preset.buildings.length, this.wood, this.meat);
   }
 
   private createAnimations() {
@@ -257,19 +347,47 @@ export default class MainScene extends Phaser.Scene {
     for (const type of types) {
       for (const color of colors) {
         const key = `${type}_${color}`;
-        (["idle", "walk", "attack"] as const).forEach((kind) => {
-          const { start, end } = animFrameRange(type, kind);
-          const animKey = `${key}-${kind}`;
-          if (this.anims.exists(animKey)) return;
-          this.anims.create({
-            key: animKey,
-            frames: this.anims.generateFrameNumbers(key, { start, end }),
-            frameRate: UNIT_ANIM[type].frameRate,
-            repeat: kind === "attack" ? 0 : -1,
+        if (UNIT_SPRITE_MODE[type] === "sheet") {
+          (["idle", "walk", "attack"] as const).forEach((kind) => {
+            const { start, end } = animFrameRange(type, kind);
+            const animKey = `${key}-${kind}`;
+            if (this.anims.exists(animKey)) return;
+            this.anims.create({
+              key: animKey,
+              frames: this.anims.generateFrameNumbers(key, { start, end }),
+              frameRate: UNIT_ANIM[type].frameRate,
+              repeat: kind === "attack" ? 0 : -1,
+            });
           });
-        });
+        } else {
+          const frames = UNIT_PERACTION_FRAMES[type]!;
+          const map: Array<["idle" | "walk" | "attack", "idle" | "run" | "attack", number]> = [
+            ["idle", "idle", frames.idle],
+            ["walk", "run", frames.walk],
+            ["attack", "attack", frames.attack],
+          ];
+          for (const [kind, file, count] of map) {
+            const animKey = `${key}-${kind}`;
+            if (this.anims.exists(animKey)) continue;
+            this.anims.create({
+              key: animKey,
+              frames: this.anims.generateFrameNumbers(`${key}_${file}`, { start: 0, end: count - 1 }),
+              frameRate: kind === "attack" ? 12 : 10,
+              repeat: kind === "attack" ? 0 : -1,
+            });
+          }
+        }
       }
     }
+    for (const color of colors) createVillagerAnimations(this, color);
+
+    this.anims.create({ key: "res_tree1-sway", frames: this.anims.generateFrameNumbers("res_tree1", { start: 0, end: 7 }), frameRate: 4, repeat: -1 });
+    this.anims.create({ key: "res_sheep-idle", frames: this.anims.generateFrameNumbers("res_sheep", { start: 0, end: 5 }), frameRate: 5, repeat: -1 });
+  }
+
+  private initialTexture(type: UnitType, color: "blue" | "red"): string {
+    if (UNIT_SPRITE_MODE[type] === "sheet") return `${type}_${color}`;
+    return `${type}_${color}_run`;
   }
 
   private buildMap() {
@@ -320,6 +438,14 @@ export default class MainScene extends Phaser.Scene {
   }
 
   // ── Spawn ──────────────────────────────────────────────────────────
+  private handleSpawnVillager() {
+    if (this.gameOver || !this.myVillagers || !this.myVillagers.canAdd()) return;
+    if (this.gold < VILLAGER_COST) return;
+    this.gold -= VILLAGER_COST;
+    this.myVillagers.addVillager();
+    this.emitHud();
+  }
+
   private handleSpawnRequest(type: UnitType) {
     if (this.gameOver || !this.opponentConnected) return;
     if (this.localUnits.size >= this.popCap) return;
@@ -332,7 +458,7 @@ export default class MainScene extends Phaser.Scene {
     const startX = this.mySide === "left" ? this.preset.baseMargin + 60 : this.preset.worldW - this.preset.baseMargin - 60;
     const y = Phaser.Math.Between(this.preset.laneYMin, this.preset.laneYMax);
     const spriteKey = `${type}_${this.mySide === "left" ? "blue" : "red"}`;
-    const sprite = this.add.sprite(startX, y, spriteKey, 0).setScale(0.4).setDepth(10);
+    const sprite = this.add.sprite(startX, y, this.initialTexture(type, this.mySide === "left" ? "blue" : "red"), 0).setScale(0.4).setDepth(10);
     sprite.setFlipX(this.mySide === "right");
     sprite.play(`${spriteKey}-walk`);
     sprite.setScale(0);
@@ -364,7 +490,10 @@ export default class MainScene extends Phaser.Scene {
       let ru = this.remoteUnits.get(u.id);
       if (!ru && u.hp > 0) {
         const spriteKey = `${u.type}_${p.side === "left" ? "blue" : "red"}`;
-        const sprite = this.add.sprite(u.x, this.laneYForRemote(u.id), spriteKey, 0).setScale(0.4).setDepth(10);
+        const sprite = this.add
+          .sprite(u.x, this.laneYForRemote(u.id), this.initialTexture(u.type, p.side === "left" ? "blue" : "red"), 0)
+          .setScale(0.4)
+          .setDepth(10);
         sprite.setFlipX(p.side === "right");
         sprite.play(`${spriteKey}-walk`);
         const hpBar = this.add.graphics().setDepth(11);
@@ -508,6 +637,8 @@ export default class MainScene extends Phaser.Scene {
     this.drawHpBar(this.myBaseBar, this.myCastle.x, this.myCastle.y - 90, this.myBaseHp, BASE_MAX_HP, 90);
     this.drawHpBar(this.enemyBaseBar, this.enemyCastle.x, this.enemyCastle.y - 90, this.enemyBaseHp, BASE_MAX_HP, 90);
 
+    this.myVillagers?.update(dt, time);
+
     if (time - this.lastBroadcastAt >= STATE_BROADCAST_MS) {
       this.lastBroadcastAt = time;
       this.broadcastState();
@@ -551,6 +682,8 @@ export default class MainScene extends Phaser.Scene {
   private emitHud() {
     gameEvents.emit("hud-update", {
       gold: this.gold,
+      wood: this.wood,
+      meat: this.meat,
       myBaseHp: this.myBaseHp,
       myBaseMaxHp: BASE_MAX_HP,
       enemyBaseHp: this.enemyBaseHp,
@@ -558,6 +691,8 @@ export default class MainScene extends Phaser.Scene {
       opponentConnected: this.opponentConnected,
       myUnits: this.localUnits.size,
       popCap: this.popCap,
+      villagers: this.myVillagers?.count ?? 0,
+      villagerMax: VILLAGER_MAX_COUNT,
     });
   }
 
