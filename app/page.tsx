@@ -48,6 +48,9 @@ export default function LobbyPage() {
               <BigButton color="red" onClick={() => setStep("online-choice")}>
                 🧑‍🤝‍🧑 Chơi với người
               </BigButton>
+              <BigButton color="blue" onClick={() => router.push("/ffa")}>
+                ⚔️ Đấu 1 chọi nhiều (chọn phe, vs 4 AI)
+              </BigButton>
             </div>
           )}
 

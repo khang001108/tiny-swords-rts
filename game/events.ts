@@ -30,6 +30,15 @@ export interface BuildingSelection {
   role: BuildingRole;
 }
 
+export interface FfaHudUpdate {
+  gold: number;
+  myUnits: number;
+  popCap: number;
+  myBaseHp: number;
+  myBaseMaxHp: number;
+  enemyBases: { color: string; hp: number; maxHp: number; alive: boolean }[];
+}
+
 export interface GameEndUpdate {
   youWin: boolean;
 }

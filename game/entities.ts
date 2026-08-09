@@ -253,6 +253,36 @@ export const RESOURCE_NODE_LAYOUT: ResourceNodeSpec[] = [
 export const RESOURCE_CAP_UNIT = 50;
 export const RESOURCE_CAP_MAX_BONUS = 6;
 
+// ── Chế độ FFA — chọn phe/màu, đấu với tối đa 4 AI cùng lúc ──────────────
+export type FactionColor = "blue" | "red" | "yellow" | "purple" | "black";
+export const FACTION_COLORS: FactionColor[] = ["blue", "red", "yellow", "purple", "black"];
+export const FACTION_LABEL: Record<FactionColor, string> = {
+  blue: "Xanh dương",
+  red: "Đỏ",
+  yellow: "Vàng",
+  purple: "Tím",
+  black: "Đen",
+};
+export const FACTION_HEX: Record<FactionColor, number> = {
+  blue: 0x3b82f6,
+  red: 0xef4444,
+  yellow: 0xeab308,
+  purple: 0xa855f7,
+  black: 0x475569,
+};
+
+/** Chỉ dùng Warrior/Archer cho chế độ FFA (đủ 5 màu); bỏ Pawn kiểu cũ vì không có bản màu Đen */
+export type FfaUnitType = "warrior" | "archer";
+export const FFA_UNIT_TYPES: FfaUnitType[] = ["warrior", "archer"];
+
+export const FFA_WORLD_W = 1500;
+export const FFA_WORLD_H = 1100;
+export const FFA_BASE_MAX_HP = 500;
+export const FFA_STARTING_GOLD = 70;
+export const FFA_GOLD_INCOME = 3;
+export const FFA_POP_CAP = 10;
+export const FFA_BOT_POP_CAP = 8;
+
 export function computePopCap(buildingsCount: number, wood: number, meat: number): number {
   const bonus = Math.min(RESOURCE_CAP_MAX_BONUS, Math.floor((wood + meat) / RESOURCE_CAP_UNIT));
   return BASE_POP_CAP + buildingsCount * POP_CAP_PER_BUILDING + bonus;
