@@ -11,7 +11,14 @@ import {
   BASE_MAX_HP,
   BUILDING_VISUALS,
   FRAME_SIZE,
+  FX_DUST_FRAMES,
+  FX_EXPLOSION_FRAMES,
   GOLD_INCOME_PER_SEC,
+  HOUSE_COST,
+  HOUSE_MAX_COUNT,
+  HOUSE_POP_BONUS,
+  HOUSE_SLOTS,
+  HOUSE_VILLAGER_BONUS,
   MAP_PRESETS,
   MapPreset,
   MapSize,
@@ -83,6 +90,10 @@ export default class MainScene extends Phaser.Scene {
   private popCap = 6;
 
   private myVillagers: VillagerSystem | null = null;
+  private myBasePos = { x: 0, y: 0 };
+  private housesBuilt = 0;
+  private paused = false;
+  private minimapG!: Phaser.GameObjects.Graphics;
 
   private myCastle!: Phaser.GameObjects.Image;
   private enemyCastle!: Phaser.GameObjects.Image;
@@ -193,6 +204,10 @@ export default class MainScene extends Phaser.Scene {
     this.load.spritesheet("res_tree1", "/assets/resources/tree1_sheet.png", { frameWidth: 192, frameHeight: 256 });
     this.load.spritesheet("res_tree2", "/assets/resources/tree2_sheet.png", { frameWidth: 192, frameHeight: 256 });
     this.load.spritesheet("res_sheep", "/assets/resources/sheep_sheet.png", { frameWidth: 128, frameHeight: 128 });
+
+    // Hiệu ứng cháy nổ / bụi khi chết
+    this.load.spritesheet("fx_dust", "/assets/fx/dust.png", { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet("fx_explosion", "/assets/fx/explosion.png", { frameWidth: 192, frameHeight: 192 });
   }
 
   create() {
@@ -206,14 +221,20 @@ export default class MainScene extends Phaser.Scene {
 
     gameEvents.on("spawn-unit", this.handleSpawnRequest, this);
     gameEvents.on("spawn-villager", this.handleSpawnVillager, this);
+    gameEvents.on("build-house", this.handleBuildHouse, this);
+    gameEvents.on("toggle-pause", this.handleTogglePause, this);
     gameEvents.on("leave-room", this.handleLeave, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       gameEvents.off("spawn-unit", this.handleSpawnRequest, this);
       gameEvents.off("spawn-villager", this.handleSpawnVillager, this);
+      gameEvents.off("build-house", this.handleBuildHouse, this);
+      gameEvents.off("toggle-pause", this.handleTogglePause, this);
       gameEvents.off("leave-room", this.handleLeave, this);
       this.sync?.disconnect();
       this.myVillagers?.destroy();
     });
+
+    this.minimapG = this.add.graphics().setDepth(100).setScrollFactor(0);
 
     this.connectRoom();
     this.emitHud();
@@ -222,11 +243,18 @@ export default class MainScene extends Phaser.Scene {
       delay: 1000,
       loop: true,
       callback: () => {
-        if (this.gameOver) return;
+        if (this.gameOver || this.paused) return;
         this.gold += GOLD_INCOME_PER_SEC;
         this.emitHud();
       },
     });
+  }
+
+  private handleTogglePause() {
+    if (this.gameOver) return;
+    this.paused = !this.paused;
+    this.sync?.setPaused?.(this.paused);
+    gameEvents.emit("pause-state", { paused: this.paused });
   }
 
   private async connectRoom() {
@@ -257,6 +285,7 @@ export default class MainScene extends Phaser.Scene {
     const myX = this.mySide === "left" ? this.preset.baseMargin : this.preset.worldW - this.preset.baseMargin;
     const enemyX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
     const midY = this.preset.worldH / 2;
+    this.myBasePos = { x: myX, y: midY };
     this.myCastle.setPosition(myX, midY);
     this.enemyCastle.setPosition(enemyX, midY);
     this.enemyCastle.setFlipX(this.mySide === "right");
@@ -302,11 +331,13 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
-    // Mỏ tài nguyên quanh base của MÌNH — dân sẽ đi khai thác ở đây
+    // Mỏ tài nguyên quanh base của MÌNH — dân sẽ đi khai thác ở đây (vị trí xáo trộn nhẹ mỗi trận)
     const myNodePos: NodePositions = { wood: { x: 0, y: 0 }, gold: { x: 0, y: 0 }, meat: { x: 0, y: 0 } };
     for (const spec of RESOURCE_NODE_LAYOUT) {
-      const nx = myX + dirMine * spec.offsetX;
-      const ny = midY + spec.offsetY;
+      const jitterX = Phaser.Math.Between(-30, 30);
+      const jitterY = Phaser.Math.Between(-25, 25);
+      const nx = myX + dirMine * spec.offsetX + jitterX;
+      const ny = Phaser.Math.Clamp(midY + spec.offsetY + jitterY, this.preset.laneYMin - 80, this.preset.laneYMax + 80);
       myNodePos[spec.kind] = { x: nx, y: ny };
       if (spec.kind === "gold") {
         this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(4);
@@ -338,7 +369,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private recomputePopCap() {
-    this.popCap = computePopCap(this.preset.buildings.length, this.wood, this.meat);
+    this.popCap = computePopCap(this.preset.buildings.length, this.wood, this.meat) + this.housesBuilt * HOUSE_POP_BONUS;
   }
 
   private createAnimations() {
@@ -383,6 +414,30 @@ export default class MainScene extends Phaser.Scene {
 
     this.anims.create({ key: "res_tree1-sway", frames: this.anims.generateFrameNumbers("res_tree1", { start: 0, end: 7 }), frameRate: 4, repeat: -1 });
     this.anims.create({ key: "res_sheep-idle", frames: this.anims.generateFrameNumbers("res_sheep", { start: 0, end: 5 }), frameRate: 5, repeat: -1 });
+    this.anims.create({
+      key: "fx_dust-play",
+      frames: this.anims.generateFrameNumbers("fx_dust", { start: 0, end: FX_DUST_FRAMES - 1 }),
+      frameRate: 16,
+      repeat: 0,
+    });
+    this.anims.create({
+      key: "fx_explosion-play",
+      frames: this.anims.generateFrameNumbers("fx_explosion", { start: 0, end: FX_EXPLOSION_FRAMES - 1 }),
+      frameRate: 18,
+      repeat: 0,
+    });
+  }
+
+  private playDeathFx(x: number, y: number) {
+    const s = this.add.sprite(x, y, "fx_dust", 0).setScale(0.8).setDepth(15);
+    s.play("fx_dust-play");
+    s.once("animationcomplete", () => s.destroy());
+  }
+
+  private playExplosionFx(x: number, y: number) {
+    const s = this.add.sprite(x, y, "fx_explosion", 0).setScale(0.9).setDepth(21);
+    s.play("fx_explosion-play");
+    s.once("animationcomplete", () => s.destroy());
   }
 
   private initialTexture(type: UnitType, color: "blue" | "red"): string {
@@ -446,6 +501,23 @@ export default class MainScene extends Phaser.Scene {
     this.emitHud();
   }
 
+  private handleBuildHouse() {
+    if (this.gameOver || this.housesBuilt >= HOUSE_MAX_COUNT) return;
+    if (this.gold < HOUSE_COST) return;
+    this.gold -= HOUSE_COST;
+    const slot = HOUSE_SLOTS[this.housesBuilt];
+    const dirMine = this.mySide === "left" ? -1 : 1;
+    const hx = this.myBasePos.x + dirMine * slot.offsetX;
+    const hy = this.myBasePos.y + slot.offsetY;
+    const color = this.mySide === "left" ? "blue" : "red";
+    const img = this.add.image(hx, hy, `bld_house1_${color}`).setScale(0).setDepth(4);
+    this.tweens.add({ targets: img, scale: 0.4, duration: 260, ease: "Back.Out" });
+    this.housesBuilt++;
+    this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
+    this.recomputePopCap();
+    this.emitHud();
+  }
+
   private handleSpawnRequest(type: UnitType) {
     if (this.gameOver || !this.opponentConnected) return;
     if (this.localUnits.size >= this.popCap) return;
@@ -483,6 +555,9 @@ export default class MainScene extends Phaser.Scene {
 
   // ── Nhận trạng thái/đòn đánh từ đối thủ ─────────────────────────────
   private applyRemoteState(p: StatePayload) {
+    if (this.enemyBaseHp > 0 && p.baseHp <= 0) {
+      this.playExplosionFx(this.enemyCastle.x, this.enemyCastle.y);
+    }
     this.enemyBaseHp = p.baseHp;
     const seen = new Set<string>();
     for (const u of p.units) {
@@ -526,6 +601,7 @@ export default class MainScene extends Phaser.Scene {
   private destroyRemoteUnit(id: string) {
     const ru = this.remoteUnits.get(id);
     if (!ru) return;
+    this.playDeathFx(ru.sprite.x, ru.sprite.y);
     ru.sprite.destroy();
     ru.hpBar.destroy();
     this.remoteUnits.delete(id);
@@ -537,6 +613,7 @@ export default class MainScene extends Phaser.Scene {
       this.myBaseHp = Math.max(0, this.myBaseHp - damage);
       this.emitHud();
       if (this.myBaseHp <= 0) {
+        this.playExplosionFx(this.myCastle.x, this.myCastle.y);
         this.sync.sendGameOver(this.mySide);
         this.endGame(false);
       }
@@ -549,6 +626,7 @@ export default class MainScene extends Phaser.Scene {
     this.time.delayedCall(80, () => u.sprite.clearTint());
     if (u.hp <= 0) {
       u.state = "dead";
+      this.playDeathFx(u.sprite.x, u.sprite.y);
       u.sprite.destroy();
       u.hpBar.destroy();
       this.localUnits.delete(targetId);
@@ -557,7 +635,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    if (this.gameOver) return;
+    if (this.gameOver || this.paused) return;
     const dt = delta / 1000;
     const dir = this.mySide === "left" ? 1 : -1;
     const enemyBaseX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
@@ -638,11 +716,41 @@ export default class MainScene extends Phaser.Scene {
     this.drawHpBar(this.enemyBaseBar, this.enemyCastle.x, this.enemyCastle.y - 90, this.enemyBaseHp, BASE_MAX_HP, 90);
 
     this.myVillagers?.update(dt, time);
+    this.drawMinimap();
 
     if (time - this.lastBroadcastAt >= STATE_BROADCAST_MS) {
       this.lastBroadcastAt = time;
       this.broadcastState();
     }
+  }
+
+  private drawMinimap() {
+    const g = this.minimapG;
+    g.clear();
+    const mmW = 140;
+    const mmH = 90;
+    const pad = 10;
+    const mmX = this.preset.worldW - mmW - pad;
+    const mmY = pad;
+    g.fillStyle(0x1a2e1a, 0.75);
+    g.fillRoundedRect(mmX, mmY, mmW, mmH, 6);
+    g.lineStyle(1.5, 0xe9dcbb, 0.6);
+    g.strokeRoundedRect(mmX, mmY, mmW, mmH, 6);
+
+    const sx = (mmW - 8) / this.preset.worldW;
+    const sy = (mmH - 8) / this.preset.worldH;
+    const toX = (x: number) => mmX + 4 + x * sx;
+    const toY = (y: number) => mmY + 4 + y * sy;
+
+    g.fillStyle(0x3b82f6, 1);
+    g.fillRect(toX(this.myCastle.x) - 3, toY(this.myCastle.y) - 3, 6, 6);
+    g.fillStyle(0xef4444, 1);
+    g.fillRect(toX(this.enemyCastle.x) - 3, toY(this.enemyCastle.y) - 3, 6, 6);
+
+    g.fillStyle(0x93c5fd, 1);
+    for (const u of this.localUnits.values()) g.fillCircle(toX(u.x), toY(u.y), 1.6);
+    g.fillStyle(0xfca5a5, 1);
+    for (const ru of this.remoteUnits.values()) g.fillCircle(toX(ru.sprite.x), toY(ru.sprite.y), 1.6);
   }
 
   private drawTowerShot(x1: number, y1: number, x2: number, y2: number) {
@@ -692,7 +800,9 @@ export default class MainScene extends Phaser.Scene {
       myUnits: this.localUnits.size,
       popCap: this.popCap,
       villagers: this.myVillagers?.count ?? 0,
-      villagerMax: VILLAGER_MAX_COUNT,
+      villagerMax: this.myVillagers?.max ?? VILLAGER_MAX_COUNT,
+      houses: this.housesBuilt,
+      housesMax: HOUSE_MAX_COUNT,
     });
   }
 

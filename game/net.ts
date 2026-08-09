@@ -50,6 +50,8 @@ export interface OpponentLink {
   sendHit(targetId: string, damage: number): void;
   sendGameOver(loserSide: Side): void;
   disconnect(): void;
+  /** Chỉ có ý nghĩa thật với AI cục bộ (BotOpponent) — RoomSync bỏ qua vì không thể tạm dừng người chơi khác */
+  setPaused?(paused: boolean): void;
 }
 
 /**

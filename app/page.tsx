@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { randomRoomCode } from "@/game/net";
-import { MAP_PRESETS, MapSize } from "@/game/entities";
+import { MAP_PRESETS, MapSize, RESOURCE_NODE_LAYOUT } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 type Step = "mode" | "bot-map" | "online-choice" | "online-map";
@@ -131,12 +131,16 @@ function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize
           <button
             key={s}
             onClick={() => onPick(s)}
-            className="w-full py-3 px-4 rounded-lg bg-black/5 hover:bg-black/10 border border-[#3a2c1a]/25 text-left transition"
+            className="w-full py-3 px-4 rounded-lg bg-black/5 hover:bg-black/10 border border-[#3a2c1a]/25 text-left transition flex items-center gap-3"
           >
-            <div className="font-bold text-[#3a2c1a]">
-              {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
+            <MapPreviewSvg size={s} />
+            <div>
+              <div className="font-bold text-[#3a2c1a]">
+                {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
+              </div>
+              <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
+              <div className="text-[#3a2c1a]/40 text-[11px] mt-0.5">{p.buildings.length} công trình quanh căn cứ</div>
             </div>
-            <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
           </button>
         );
       })}
@@ -144,5 +148,43 @@ function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize
         ← Quay lại
       </button>
     </div>
+  );
+}
+
+/** Xem trước bố cục bản đồ thật (vị trí căn cứ + mỏ tài nguyên) trước khi vào trận */
+function MapPreviewSvg({ size }: { size: MapSize }) {
+  const p = MAP_PRESETS[size];
+  const W = 96;
+  const H = Math.round((p.worldH / p.worldW) * W);
+  const sx = W / p.worldW;
+  const sy = H / p.worldH;
+  const leftX = p.baseMargin * sx;
+  const rightX = (p.worldW - p.baseMargin) * sx;
+  const midY = (p.worldH / 2) * sy;
+  const forestH = Math.max(3, 18 * sy * (p.treeSpacing < 70 ? 0.8 : 1));
+
+  const resDot = (baseX: number, dir: 1 | -1, color: string, key: string) => {
+    const spec = RESOURCE_NODE_LAYOUT.find((r) => r.kind === key)!;
+    const x = baseX + dir * spec.offsetX * sx;
+    const y = midY + spec.offsetY * sy;
+    return <circle key={key} cx={x} cy={y} r={1.6} fill={color} />;
+  };
+
+  return (
+    <svg width={W} height={H} className="rounded shrink-0 border border-black/20" style={{ background: "#4a7a4a" }}>
+      <rect x={0} y={0} width={W} height={forestH} fill="#2f5a2f" />
+      <rect x={0} y={H - forestH} width={W} height={forestH} fill="#2f5a2f" />
+      <rect x={0} y={0} width={W} height={H} fill="none" />
+      {/* căn cứ */}
+      <rect x={leftX - 3} y={midY - 3} width={6} height={6} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.5} />
+      <rect x={rightX - 3} y={midY - 3} width={6} height={6} fill="#ef4444" stroke="#1e293b" strokeWidth={0.5} />
+      {/* mỏ tài nguyên quanh mỗi base (đối xứng) */}
+      {resDot(leftX, 1, "#a3752c", "wood")}
+      {resDot(leftX, 1, "#facc15", "gold")}
+      {resDot(leftX, 1, "#f472b6", "meat")}
+      {resDot(rightX, -1, "#a3752c", "wood")}
+      {resDot(rightX, -1, "#facc15", "gold")}
+      {resDot(rightX, -1, "#f472b6", "meat")}
+    </svg>
   );
 }

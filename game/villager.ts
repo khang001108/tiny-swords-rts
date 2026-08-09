@@ -25,6 +25,7 @@ export type NodePositions = Record<ResourceKind, { x: number; y: number }>;
 export class VillagerSystem {
   private villagers: Villager[] = [];
   private color: "blue" | "red";
+  private maxCount = VILLAGER_MAX_COUNT;
 
   constructor(
     private scene: Phaser.Scene,
@@ -40,8 +41,16 @@ export class VillagerSystem {
     return this.villagers.length;
   }
 
+  get max() {
+    return this.maxCount;
+  }
+
+  increaseMax(n: number) {
+    this.maxCount += n;
+  }
+
   canAdd() {
-    return this.villagers.length < VILLAGER_MAX_COUNT;
+    return this.villagers.length < this.maxCount;
   }
 
   /** Đếm số dân theo mỗi loại tài nguyên đang được phân công — dùng để cân bằng tải khi thêm dân mới */

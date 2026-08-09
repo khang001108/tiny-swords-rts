@@ -16,6 +16,12 @@ export interface HudUpdate {
   popCap: number;
   villagers: number;
   villagerMax: number;
+  houses: number;
+  housesMax: number;
+}
+
+export interface PauseState {
+  paused: boolean;
 }
 
 export interface GameEndUpdate {

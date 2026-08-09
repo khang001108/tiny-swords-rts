@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
-import { gameEvents, HudUpdate, GameEndUpdate } from "@/game/events";
-import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST } from "@/game/entities";
+import { gameEvents, HudUpdate, GameEndUpdate, PauseState } from "@/game/events";
+import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST, HOUSE_COST } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 export default function GameCanvas({
@@ -31,8 +31,11 @@ export default function GameCanvas({
     popCap: 6,
     villagers: 0,
     villagerMax: 6,
+    houses: 0,
+    housesMax: 3,
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -40,12 +43,15 @@ export default function GameCanvas({
 
     const onHud = (p: HudUpdate) => setHud(p);
     const onEnd = (p: GameEndUpdate) => setResult(p);
+    const onPause = (p: PauseState) => setPaused(p.paused);
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
+    gameEvents.on("pause-state", onPause);
 
     return () => {
       gameEvents.off("hud-update", onHud);
       gameEvents.off("game-end", onEnd);
+      gameEvents.off("pause-state", onPause);
       gameEvents.emit("leave-room");
       game.destroy(true);
     };
@@ -54,6 +60,8 @@ export default function GameCanvas({
 
   const spawn = (type: UnitType) => gameEvents.emit("spawn-unit", type);
   const spawnVillager = () => gameEvents.emit("spawn-villager");
+  const buildHouse = () => gameEvents.emit("build-house");
+  const togglePause = () => gameEvents.emit("toggle-pause");
   const preset = MAP_PRESETS[mapSize];
   const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
 
@@ -94,6 +102,13 @@ export default function GameCanvas({
           <img src={icon("meat")} className="icon-inline" alt="" />
           {hud.meat}
         </span>
+        <button
+          onClick={togglePause}
+          className="ml-auto px-2.5 py-1 rounded bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 text-xs font-semibold"
+          title={mode === "online" ? "Chỉ tạm dừng phía bạn — đối thủ vẫn tiếp tục" : "Tạm dừng"}
+        >
+          {paused ? "▶ Tiếp tục" : "⏸ Tạm dừng"}
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2 mb-2 px-1">
@@ -108,7 +123,28 @@ export default function GameCanvas({
         />
       </div>
 
-      <div ref={containerRef} className="relative w-full rounded-lg overflow-hidden border border-white/10 shadow-xl">
+      <div
+        ref={containerRef}
+        className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl"
+        style={{ aspectRatio: `${preset.worldW} / ${preset.worldH}`, maxHeight: "68vh" }}
+      >
+        {paused && !result && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
+            <div className="text-center">
+              <div className="text-3xl font-extrabold text-white mb-4">⏸ Đã tạm dừng</div>
+              <button onClick={togglePause} className="w-40 h-12 block mx-auto">
+                <NineSlice prefix="btn-blue" className="w-full h-full">
+                  <span className="font-bold text-white text-sm">Tiếp tục</span>
+                </NineSlice>
+              </button>
+              {mode === "online" && (
+                <p className="text-white/50 text-xs mt-3 max-w-[260px]">
+                  Lưu ý: ở chế độ chơi với người, tạm dừng chỉ dừng phía bạn — đối thủ vẫn tiếp tục hành động.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
         {result && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
             <NineSlice prefix="paper" style={{ width: 340, height: 220 }}>
@@ -159,7 +195,7 @@ export default function GameCanvas({
         <button
           onClick={spawnVillager}
           disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
-          className={`h-14 min-w-[130px] transition ${
+          className={`h-14 min-w-[120px] transition ${
             hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
               ? "opacity-40 grayscale"
               : "active:scale-[0.97]"
@@ -175,10 +211,30 @@ export default function GameCanvas({
             </span>
           </NineSlice>
         </button>
+
+        <button
+          onClick={buildHouse}
+          disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
+          className={`h-14 min-w-[150px] transition ${
+            hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax
+              ? "opacity-40 grayscale"
+              : "active:scale-[0.97]"
+          }`}
+        >
+          <NineSlice prefix="btn-red" className="w-full h-full">
+            <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+              🏠 Xây nhà ({hud.houses}/{hud.housesMax})
+              <span className="inline-flex items-center text-xs opacity-90">
+                <img src={icon("gold")} className="icon-inline" alt="" />
+                {HOUSE_COST}
+              </span>
+            </span>
+          </NineSlice>
+        </button>
       </div>
       {hud.myUnits >= hud.popCap && (
         <p className="text-xs text-amber-400/80 mt-1 px-1">
-          Đã đạt giới hạn quân số — cho dân khai thác thêm Gỗ/Thịt hoặc xây thêm công trình (bản đồ lớn hơn) để tăng giới hạn.
+          Đã đạt giới hạn quân số — xây thêm nhà dân hoặc để dân khai thác thêm Gỗ/Thịt để nới giới hạn.
         </p>
       )}
     </div>

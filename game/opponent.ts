@@ -102,6 +102,11 @@ export class BotOpponent implements OpponentLink {
     this.finish(null);
   }
 
+  setPaused(paused: boolean) {
+    if (paused) this.stop();
+    else if (!this.ended) this.start();
+  }
+
   disconnect() {
     this.stop();
   }

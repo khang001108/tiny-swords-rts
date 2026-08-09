@@ -230,3 +230,19 @@ export function computePopCap(buildingsCount: number, wood: number, meat: number
   const bonus = Math.min(RESOURCE_CAP_MAX_BONUS, Math.floor((wood + meat) / RESOURCE_CAP_UNIT));
   return BASE_POP_CAP + buildingsCount * POP_CAP_PER_BUILDING + bonus;
 }
+
+// ── Nhà dân (mua thêm để nới giới hạn quân số + dân) ────────────────────
+export const HOUSE_COST = 40;
+export const HOUSE_POP_BONUS = 3;
+export const HOUSE_VILLAGER_BONUS = 2;
+export const HOUSE_MAX_COUNT = 3;
+/** Vị trí các nhà dân được xây thêm, lệch dần ra so với base (theo cùng quy ước offset) */
+export const HOUSE_SLOTS: { offsetX: number; offsetY: number }[] = [
+  { offsetX: -160, offsetY: 60 },
+  { offsetX: 160, offsetY: -70 },
+  { offsetX: 150, offsetY: 130 },
+];
+
+// ── Hiệu ứng ─────────────────────────────────────────────────────────
+export const FX_DUST_FRAMES = 8;
+export const FX_EXPLOSION_FRAMES = 10;
