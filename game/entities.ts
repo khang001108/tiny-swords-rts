@@ -71,6 +71,11 @@ export interface MapPreset {
   grassTexture: string;
   treeSpacing: number;
   buildings: BuildingKey[];
+  riverX: number;
+  riverWidth: number;
+  bridgeYs: number[];
+  bridgeHeight: number;
+  hillSpecs: { x: number; y: number; scale: number }[];
 }
 
 export const MAP_PRESETS: Record<MapSize, MapPreset> = {
@@ -86,6 +91,11 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     grassTexture: "grass_tile_small",
     treeSpacing: 66,
     buildings: ["tower"],
+    riverX: 450,
+    riverWidth: 46,
+    bridgeYs: [330],
+    bridgeHeight: 74,
+    hillSpecs: [{ x: 290, y: 250, scale: 0.5 }],
   },
   medium: {
     size: "medium",
@@ -99,6 +109,14 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     grassTexture: "grass_tile",
     treeSpacing: 78,
     buildings: ["tower", "barracks"],
+    riverX: 640,
+    riverWidth: 58,
+    bridgeYs: [315, 465],
+    bridgeHeight: 72,
+    hillSpecs: [
+      { x: 420, y: 260, scale: 0.6 },
+      { x: 860, y: 500, scale: 0.6 },
+    ],
   },
   large: {
     size: "large",
@@ -112,6 +130,15 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     grassTexture: "grass_tile_large",
     treeSpacing: 88,
     buildings: ["tower", "barracks", "house1", "monastery"],
+    riverX: 850,
+    riverWidth: 66,
+    bridgeYs: [352, 470, 588],
+    bridgeHeight: 70,
+    hillSpecs: [
+      { x: 560, y: 330, scale: 0.7 },
+      { x: 1150, y: 610, scale: 0.7 },
+      { x: 850, y: 715, scale: 0.5 },
+    ],
   },
 };
 

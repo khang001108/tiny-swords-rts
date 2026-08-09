@@ -8,6 +8,7 @@ export interface UnitSnapshot {
   id: string;
   type: "pawn" | "warrior" | "archer";
   x: number;
+  y: number;
   hp: number;
   maxHp: number;
   state: "walk" | "attack" | "dead";

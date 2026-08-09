@@ -17,6 +17,7 @@ interface BotUnit {
   id: string;
   type: UnitType;
   x: number;
+  y: number;
   hp: number;
   maxHp: number;
   state: "walk" | "attack" | "dead";
@@ -56,12 +57,24 @@ export class BotOpponent implements OpponentLink {
 
   private readonly leftBaseX: number;
   private readonly rightBaseX: number;
+  private readonly midY: number;
+  private readonly laneYMin: number;
+  private readonly laneYMax: number;
   private readonly popCap: number;
+  private readonly riverXMin: number;
+  private readonly riverXMax: number;
+  private readonly bridgeYs: number[];
 
-  constructor(preset: MapPreset, private difficulty: "easy" | "normal" | "hard" = "normal") {
+  constructor(private preset: MapPreset, private difficulty: "easy" | "normal" | "hard" = "normal") {
     this.leftBaseX = preset.baseMargin;
     this.rightBaseX = preset.worldW - preset.baseMargin;
+    this.midY = preset.worldH / 2;
+    this.laneYMin = preset.laneYMin;
+    this.laneYMax = preset.laneYMax;
     this.popCap = BASE_POP_CAP + preset.buildings.length * POP_CAP_PER_BUILDING;
+    this.riverXMin = preset.riverX - preset.riverWidth / 2;
+    this.riverXMax = preset.riverX + preset.riverWidth / 2;
+    this.bridgeYs = preset.bridgeYs;
   }
 
   on(handlers: Handlers) {
@@ -148,11 +161,43 @@ export class BotOpponent implements OpponentLink {
       id,
       type: cfg.key,
       x: this.rightBaseX - 60,
+      y: this.laneYMin + Math.random() * (this.laneYMax - this.laneYMin),
       hp: cfg.hp,
       maxHp: cfg.hp,
       state: "walk",
       lastAttackAt: 0,
     });
+  }
+
+  private needsRiverCrossing(fromX: number, toX: number): boolean {
+    return (fromX <= this.riverXMin && toX >= this.riverXMin) || (fromX >= this.riverXMax && toX <= this.riverXMax);
+  }
+
+  private nearestBridgeY(y: number): number {
+    if (!this.bridgeYs.length) return y;
+    let best = this.bridgeYs[0];
+    let bestD = Infinity;
+    for (const by of this.bridgeYs) {
+      const dd = Math.abs(by - y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = by;
+      }
+    }
+    return best;
+  }
+
+  /** Waypoint kế tiếp — tự động lái quân qua đúng cây cầu gần nhất khi cần băng sông (không né đồi để giữ AI đơn giản) */
+  private waypoint(x: number, y: number, targetX: number, targetY: number): { x: number; y: number } {
+    if (this.needsRiverCrossing(x, targetX)) {
+      const by = this.nearestBridgeY(y);
+      if (Math.abs(y - by) > 12) {
+        const edgeX = x < this.preset.riverX ? Math.min(x, this.riverXMin - 6) : Math.max(x, this.riverXMax + 6);
+        return { x: edgeX, y: by };
+      }
+      return { x: targetX, y: by };
+    }
+    return { x: targetX, y: targetY };
   }
 
   private tick() {
@@ -167,13 +212,13 @@ export class BotOpponent implements OpponentLink {
       let nearestDist = Infinity;
       for (const hu of this.humanUnits) {
         if (hu.hp <= 0) continue;
-        const d = Math.abs(hu.x - u.x);
+        const d = Math.hypot(hu.x - u.x, hu.y - u.y);
         if (d < nearestDist) {
           nearestDist = d;
           nearest = hu;
         }
       }
-      const distToBase = Math.abs(this.leftBaseX - u.x);
+      const distToBase = Math.hypot(this.leftBaseX - u.x, this.midY - u.y);
       const canHitUnit = !!nearest && nearestDist <= cfg.range;
       const canHitBase = !canHitUnit && distToBase <= Math.max(cfg.range, 70);
 
@@ -189,17 +234,25 @@ export class BotOpponent implements OpponentLink {
         }
       } else {
         u.state = "walk";
-        u.x -= cfg.speed * dt;
-        u.x = Math.max(this.leftBaseX, Math.min(this.rightBaseX, u.x));
+        const wp = this.waypoint(u.x, u.y, this.leftBaseX, u.y);
+        const dx = wp.x - u.x;
+        const dy = wp.y - u.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const step = cfg.speed * dt;
+        u.x += (dx / d) * Math.min(step, d);
+        u.y += (dy / d) * Math.min(step, d);
+        u.x = Math.max(this.leftBaseX - 40, Math.min(this.rightBaseX + 40, u.x));
+        u.y = Math.max(20, Math.min(this.preset.worldH - 20, u.y));
       }
     }
 
     // Tháp canh của bot tự bắn quân người chơi lại gần
     let towerTarget: UnitSnapshot | null = null;
     let towerDist = Infinity;
+    const towerX = this.rightBaseX - 60;
     for (const hu of this.humanUnits) {
       if (hu.hp <= 0) continue;
-      const d = Math.abs(hu.x - (this.rightBaseX - 60));
+      const d = Math.hypot(hu.x - towerX, hu.y - this.midY);
       if (d < towerDist) {
         towerDist = d;
         towerTarget = hu;
@@ -214,6 +267,7 @@ export class BotOpponent implements OpponentLink {
       id: u.id,
       type: u.type,
       x: u.x,
+      y: u.y,
       hp: u.hp,
       maxHp: u.maxHp,
       state: u.state,

@@ -64,7 +64,7 @@ interface RemoteUnit {
   sprite: Phaser.GameObjects.Sprite;
   hpBar: Phaser.GameObjects.Graphics;
   targetX: number;
-  y: number;
+  targetY: number;
   hp: number;
   maxHp: number;
   type: UnitType;
@@ -108,6 +108,10 @@ export default class MainScene extends Phaser.Scene {
   private selectionRing!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
+  private riverBand: { xMin: number; xMax: number } | null = null;
+  private bridges: { y: number }[] = [];
+  private hillObstacles: { x: number; y: number; r: number }[] = [];
+
   private localUnits = new Map<string, LocalUnit>();
   private remoteUnits = new Map<string, RemoteUnit>();
   private lastBroadcastAt = 0;
@@ -138,6 +142,8 @@ export default class MainScene extends Phaser.Scene {
     this.load.image("deco_mushroom", "/assets/terrain/deco/mushroom.png");
     this.load.image("goldmine", "/assets/ui/GoldMine_Active.png");
     this.load.image("banner", "/assets/ui/Banner_Vertical.png");
+    this.load.image("hill", "/assets/terrain/hill.png");
+    this.load.image("water_tile", "/assets/terrain/water_tile.png");
 
     this.load.image("castle_blue", "/assets/buildings/Castle_Blue.png");
     this.load.image("castle_red", "/assets/buildings/Castle_Red.png");
@@ -518,6 +524,114 @@ export default class MainScene extends Phaser.Scene {
       this.add.image(x + 70, laneYMax + 45, decoKeys[(d + 1) % decoKeys.length]).setScale(0.6).setDepth(3).setAlpha(0.9);
       d++;
     }
+
+    this.buildRiver();
+    this.buildHills();
+  }
+
+  private buildRiver() {
+    const { riverX, riverWidth, bridgeYs, bridgeHeight, worldH } = this.preset;
+    const xMin = riverX - riverWidth / 2;
+    const xMax = riverX + riverWidth / 2;
+    this.riverBand = { xMin, xMax };
+    this.bridges = bridgeYs.map((y) => ({ y }));
+
+    const water = this.add.tileSprite(xMin, 0, riverWidth, worldH, "water_tile").setOrigin(0, 0).setDepth(2);
+    water.setTileScale(1, 1);
+
+    const shore = this.add.graphics().setDepth(2);
+    shore.lineStyle(3, 0xbdf4f0, 0.55);
+    shore.lineBetween(xMin, 0, xMin, worldH);
+    shore.lineBetween(xMax, 0, xMax, worldH);
+    shore.lineStyle(1.5, 0x0e5f5a, 0.35);
+    shore.lineBetween(xMin - 2, 0, xMin - 2, worldH);
+    shore.lineBetween(xMax + 2, 0, xMax + 2, worldH);
+
+    for (const by of bridgeYs) {
+      const plank = this.add.graphics().setDepth(3);
+      const top = by - bridgeHeight / 2;
+      plank.fillStyle(0x8a5a34, 1);
+      plank.fillRect(xMin - 6, top, riverWidth + 12, bridgeHeight);
+      plank.lineStyle(2, 0x5c3a1e, 0.8);
+      for (let px = xMin - 6; px < xMax + 6; px += 10) {
+        plank.lineBetween(px, top, px, top + bridgeHeight);
+      }
+      plank.lineStyle(3, 0x5c3a1e, 0.9);
+      plank.strokeRect(xMin - 6, top, riverWidth + 12, bridgeHeight);
+    }
+  }
+
+  private buildHills() {
+    this.hillObstacles = [];
+    for (const h of this.preset.hillSpecs) {
+      const shadow = this.add.graphics().setDepth(2);
+      shadow.fillStyle(0x000000, 0.2);
+      shadow.fillEllipse(h.x, h.y + 46 * h.scale, 120 * h.scale, 30 * h.scale);
+      this.add.image(h.x, h.y, "hill").setScale(h.scale).setDepth(3);
+      const rockKey = Phaser.Math.RND.pick(["deco_rock", "deco_bush"]);
+      this.add.image(h.x - 18 * h.scale, h.y - 10 * h.scale, rockKey).setScale(0.5 * h.scale).setDepth(4);
+      this.hillObstacles.push({ x: h.x, y: h.y, r: 58 * h.scale });
+    }
+  }
+
+  private needsRiverCrossing(fromX: number, toX: number): boolean {
+    if (!this.riverBand) return false;
+    const { xMin, xMax } = this.riverBand;
+    return (fromX <= xMin && toX >= xMin) || (fromX >= xMax && toX <= xMax);
+  }
+
+  private nearestBridgeY(y: number): number {
+    if (!this.bridges.length) return y;
+    let best = this.bridges[0].y;
+    let bestD = Infinity;
+    for (const b of this.bridges) {
+      const dd = Math.abs(b.y - y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = b.y;
+      }
+    }
+    return best;
+  }
+
+  private applyHillAvoidance(x: number, y: number, tx: number, ty: number): { x: number; y: number } {
+    const toTargetX = tx - x;
+    const toTargetY = ty - y;
+    const targetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY) || 1;
+    const dirX = toTargetX / targetDist;
+    const dirY = toTargetY / targetDist;
+    for (const h of this.hillObstacles) {
+      const toHillX = h.x - x;
+      const toHillY = h.y - y;
+      const proj = Phaser.Math.Clamp(toHillX * dirX + toHillY * dirY, 0, targetDist);
+      const closestX = x + dirX * proj;
+      const closestY = y + dirY * proj;
+      const distToHill = Phaser.Math.Distance.Between(h.x, h.y, closestX, closestY);
+      if (distToHill < h.r + 16) {
+        const perpX = -dirY;
+        const perpY = dirX;
+        const side = (h.x - x) * perpX + (h.y - y) * perpY < 0 ? 1 : -1;
+        const pushDist = h.r + 22 - distToHill;
+        return { x: closestX + perpX * side * pushDist, y: closestY + perpY * side * pushDist };
+      }
+    }
+    return { x: tx, y: ty };
+  }
+
+  /** Tính điểm đích tạm thời (waypoint) cho 1 bước di chuyển — tự né sông (đi qua cầu gần nhất) và né đồi */
+  private computeWaypoint(x: number, y: number, targetX: number, targetY: number): { x: number; y: number } {
+    let wp = { x: targetX, y: targetY };
+    if (this.needsRiverCrossing(x, targetX)) {
+      const by = this.nearestBridgeY(y);
+      const bandCenterX = this.riverBand ? (this.riverBand.xMin + this.riverBand.xMax) / 2 : targetX;
+      if (Math.abs(y - by) > 12) {
+        const edgeX = x < bandCenterX ? Math.min(x, this.riverBand!.xMin - 6) : Math.max(x, this.riverBand!.xMax + 6);
+        wp = { x: edgeX, y: by };
+      } else {
+        wp = { x: targetX, y: by };
+      }
+    }
+    return this.applyHillAvoidance(x, y, wp.x, wp.y);
   }
 
   // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh ───────────
@@ -660,7 +774,7 @@ export default class MainScene extends Phaser.Scene {
       if (!ru && u.hp > 0) {
         const spriteKey = `${u.type}_${p.side === "left" ? "blue" : "red"}`;
         const sprite = this.add
-          .sprite(u.x, this.laneYForRemote(u.id), this.initialTexture(u.type, p.side === "left" ? "blue" : "red"), 0)
+          .sprite(u.x, u.y, this.initialTexture(u.type, p.side === "left" ? "blue" : "red"), 0)
           .setScale(0.4)
           .setDepth(10);
         sprite.setFlipX(p.side === "right");
@@ -668,11 +782,22 @@ export default class MainScene extends Phaser.Scene {
         sprite.setInteractive({ cursor: "pointer" });
         sprite.setData("kind", "enemy");
         const hpBar = this.add.graphics().setDepth(11);
-        ru = { sprite, hpBar, targetX: u.x, y: sprite.y, hp: u.hp, maxHp: u.maxHp, type: u.type, spriteKey, lastAnimState: "walk" };
+        ru = {
+          sprite,
+          hpBar,
+          targetX: u.x,
+          targetY: u.y,
+          hp: u.hp,
+          maxHp: u.maxHp,
+          type: u.type,
+          spriteKey,
+          lastAnimState: "walk",
+        };
         this.remoteUnits.set(u.id, ru);
       }
       if (ru) {
         ru.targetX = u.x;
+        ru.targetY = u.y;
         ru.hp = u.hp;
         ru.maxHp = u.maxHp;
         if (u.state !== ru.lastAnimState) {
@@ -686,12 +811,6 @@ export default class MainScene extends Phaser.Scene {
     for (const id of Array.from(this.remoteUnits.keys())) {
       if (!seen.has(id)) this.destroyRemoteUnit(id);
     }
-  }
-
-  private laneYForRemote(id: string): number {
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-    return this.preset.laneYMin + (hash % (this.preset.laneYMax - this.preset.laneYMin));
   }
 
   private destroyRemoteUnit(id: string) {
@@ -733,7 +852,6 @@ export default class MainScene extends Phaser.Scene {
   update(time: number, delta: number) {
     if (this.gameOver || this.paused) return;
     const dt = delta / 1000;
-    const dir = this.mySide === "left" ? 1 : -1;
     const enemyBaseX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
 
     for (const u of this.localUnits.values()) {
@@ -775,22 +893,21 @@ export default class MainScene extends Phaser.Scene {
           u.lastAnimState = "walk";
           u.sprite.play(`${u.spriteKey}-walk`, true);
         }
-        if (u.manualTarget) {
-          const dx = u.manualTarget.x - u.x;
-          const dy = u.manualTarget.y - u.y;
-          const d = Math.sqrt(dx * dx + dy * dy) || 1;
-          const step = cfg.speed * dt;
-          if (d <= step) {
-            u.x = u.manualTarget.x;
-            u.y = u.manualTarget.y;
-            u.manualTarget = null;
-          } else {
-            u.x += (dx / d) * step;
-            u.y += (dy / d) * step;
-            u.sprite.setFlipX(dx < 0);
-          }
+        const finalX = u.manualTarget ? u.manualTarget.x : enemyBaseX;
+        const finalY = u.manualTarget ? u.manualTarget.y : u.y;
+        const wp = this.computeWaypoint(u.x, u.y, finalX, finalY);
+        const dx = wp.x - u.x;
+        const dy = wp.y - u.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const step = cfg.speed * dt;
+        if (u.manualTarget && d <= step && Math.abs(wp.x - finalX) < 1 && Math.abs(wp.y - finalY) < 1) {
+          u.x = finalX;
+          u.y = finalY;
+          u.manualTarget = null;
         } else {
-          u.x += dir * cfg.speed * dt;
+          u.x += (dx / d) * Math.min(step, d);
+          u.y += (dy / d) * Math.min(step, d);
+          u.sprite.setFlipX(dx < 0);
         }
         u.x = Phaser.Math.Clamp(u.x, this.preset.baseMargin - 40, this.preset.worldW - this.preset.baseMargin + 40);
         u.y = Phaser.Math.Clamp(u.y, 20, this.preset.worldH - 20);
@@ -803,6 +920,8 @@ export default class MainScene extends Phaser.Scene {
 
     for (const ru of this.remoteUnits.values()) {
       ru.sprite.x = Phaser.Math.Linear(ru.sprite.x, ru.targetX, Math.min(1, dt * 6));
+      ru.sprite.y = Phaser.Math.Linear(ru.sprite.y, ru.targetY, Math.min(1, dt * 6));
+      ru.sprite.setDepth(10 + ru.sprite.y / 1000);
       this.drawHpBar(ru.hpBar, ru.sprite.x, ru.sprite.y - 34, ru.hp, ru.maxHp, 30);
     }
 
@@ -884,6 +1003,7 @@ export default class MainScene extends Phaser.Scene {
       id: u.id,
       type: u.type,
       x: u.x,
+      y: u.y,
       hp: u.hp,
       maxHp: u.maxHp,
       state: u.state,
