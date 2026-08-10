@@ -23,8 +23,6 @@ import {
   RESOURCE_LABEL,
   ResourceKind,
   ENDLESS_RECORD_KEY,
-  PORTRAIT_W,
-  PORTRAIT_H,
 } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
@@ -200,12 +198,12 @@ export default function GameCanvas({
   const atCap = hud.myUnits >= hud.popCap;
 
   return (
-    <div className="w-full mx-auto" style={{ maxWidth: 460 }}>
+    <div className="w-full mx-auto" style={{ maxWidth: 900 }}>
       {/* ══ GAME WORLD — canvas Phaser lo hết: terrain/unit/building/camera/minimap ══ */}
       <div
         ref={containerRef}
         className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl touch-none select-none"
-        style={{ aspectRatio: `${PORTRAIT_W} / ${PORTRAIT_H}`, maxHeight: "94vh" }}
+        style={{ width: "100%", height: "min(94vh, 900px)" }}
       >
         {/* ══ SCREEN SPACE cố định ══ */}
 

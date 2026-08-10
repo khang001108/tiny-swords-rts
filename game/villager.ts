@@ -71,7 +71,7 @@ export class VillagerSystem {
       assign = (Object.keys(counts) as ResourceKind[]).sort((a, b) => counts[a] - counts[b])[0];
     }
     const spawnPos = { x: this.basePos.x + Phaser.Math.Between(-16, 16), y: this.basePos.y + Phaser.Math.Between(-16, 16) };
-    const sprite = this.scene.add.sprite(spawnPos.x, spawnPos.y, this.texKey(assign, "run")).setScale(0.34).setDepth(9);
+    const sprite = this.scene.add.sprite(spawnPos.x, spawnPos.y, this.texKey(assign, "run")).setScale(0.34).setDepth(6);
     sprite.play(this.animKey(assign, "run"));
     sprite.setInteractive({ cursor: "pointer" });
     const id = `v${this.counter++}`;
@@ -144,7 +144,7 @@ export class VillagerSystem {
           }
         }
         v.sprite.setPosition(v.x, v.y);
-        v.sprite.setDepth(9 + v.y / 1000);
+        v.sprite.setDepth(6 + v.y / 1000);
         continue;
       }
 
@@ -171,7 +171,7 @@ export class VillagerSystem {
         }
       }
       v.sprite.setPosition(v.x, v.y);
-      v.sprite.setDepth(9 + v.y / 1000);
+      v.sprite.setDepth(6 + v.y / 1000);
     }
   }
 

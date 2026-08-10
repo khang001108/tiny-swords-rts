@@ -26,8 +26,6 @@ import {
   MapPreset,
   MapSize,
   computePopCap,
-  PORTRAIT_W,
-  PORTRAIT_H,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
   RESOURCE_LABEL,
@@ -410,13 +408,36 @@ export default class MainScene extends Phaser.Scene {
   private setupCamera() {
     const cam = this.cameras.main;
     cam.setBounds(0, 0, this.preset.worldW, this.preset.worldH);
-    const fitZoomH = PORTRAIT_H / this.preset.worldH;
-    const fitZoomW = PORTRAIT_W / this.preset.worldW;
-    this.minZoom = Math.max(fitZoomH, fitZoomW);
-    this.maxZoom = this.minZoom * 3.2;
+    this.recalcZoomBounds();
     const defaultZoom = Phaser.Math.Clamp(this.minZoom * 1.15, this.minZoom, this.maxZoom);
     cam.setZoom(defaultZoom);
     cam.centerOn(this.myBasePos.x, this.myBasePos.y);
+
+    // Xoay máy / đổi kích thước cửa sổ → tính lại vùng nhìn & giới hạn zoom theo viewport MỚI.
+    // Không đụng tới game state (unit/building/resource) — chỉ camera.
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.handleViewportResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.handleViewportResize, this);
+    });
+  }
+
+  private recalcZoomBounds() {
+    const viewW = this.scale.width;
+    const viewH = this.scale.height;
+    const fitZoomH = viewH / this.preset.worldH;
+    const fitZoomW = viewW / this.preset.worldW;
+    this.minZoom = Math.max(fitZoomH, fitZoomW);
+    this.maxZoom = this.minZoom * 3.2;
+  }
+
+  private handleViewportResize() {
+    const cam = this.cameras.main;
+    const prevZoom = cam.zoom;
+    this.recalcZoomBounds();
+    // Giữ nguyên mức zoom hiện tại nếu vẫn hợp lệ với viewport mới; chỉ kẹp lại nếu vượt giới hạn
+    // (ví dụ xoay dọc→ngang khiến viewport thấp hơn, minZoom tăng lên) — không re-center, không reset state.
+    const clamped = Phaser.Math.Clamp(prevZoom, this.minZoom, this.maxZoom);
+    cam.setZoom(clamped);
   }
 
   private layoutBases() {
@@ -427,6 +448,8 @@ export default class MainScene extends Phaser.Scene {
     this.myBuildingPositions.push({ x: myX, y: midY });
     this.myCastle.setPosition(myX, midY);
     this.enemyCastle.setPosition(enemyX, midY);
+    this.myCastle.setDepth(this.yDepth(midY));
+    this.enemyCastle.setDepth(this.yDepth(midY));
     this.enemyCastle.setFlipX(this.mySide === "right");
     this.myCastle.setFlipX(this.mySide === "left");
 
@@ -462,8 +485,8 @@ export default class MainScene extends Phaser.Scene {
       const myBx = myX + dirMine * visual.offsetX;
       const enemyBx = enemyX + dirEnemy * visual.offsetX;
       const by = midY + visual.offsetY;
-      const myImg = this.add.image(myBx, by, `bld_${b}_blue`).setScale(visual.scale).setDepth(4);
-      this.add.image(enemyBx, by, `bld_${b}_red`).setScale(visual.scale).setDepth(4);
+      const myImg = this.add.image(myBx, by, `bld_${b}_blue`).setScale(visual.scale).setDepth(this.yDepth(by));
+      this.add.image(enemyBx, by, `bld_${b}_red`).setScale(visual.scale).setDepth(this.yDepth(by));
       myImg.setInteractive({ cursor: "pointer" });
       myImg.setData("kind", "my-building");
       myImg.setData("role", b);
@@ -483,23 +506,23 @@ export default class MainScene extends Phaser.Scene {
       const ny = Phaser.Math.Clamp(midY + spec.offsetY + jitterY, this.preset.laneYMin - 80, this.preset.laneYMax + 80);
       myNodePos[spec.kind] = { x: nx, y: ny };
       if (spec.kind === "gold") {
-        const img = this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(4);
+        const img = this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(this.yDepth(ny));
         img.setInteractive({ cursor: "pointer" });
         img.setData("kind", "resource");
         img.setData("resourceKind", "gold");
       } else if (spec.kind === "wood") {
-        const t1 = this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(4);
+        const t1 = this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(this.yDepth(ny));
         t1.play("res_tree1-sway");
-        const t2 = this.add.sprite(nx + 20, ny + 10, "res_tree2", 0).setScale(0.36).setDepth(4);
+        const t2 = this.add.sprite(nx + 20, ny + 10, "res_tree2", 0).setScale(0.36).setDepth(this.yDepth(ny + 10));
         [t1, t2].forEach((s) => {
           s.setInteractive({ cursor: "pointer" });
           s.setData("kind", "resource");
           s.setData("resourceKind", "wood");
         });
       } else {
-        const s1 = this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(4);
+        const s1 = this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(this.yDepth(ny));
         s1.play("res_sheep-idle");
-        const s2 = this.add.sprite(nx + 18, ny + 8, "res_sheep", 0).setScale(0.5).setDepth(4);
+        const s2 = this.add.sprite(nx + 18, ny + 8, "res_sheep", 0).setScale(0.5).setDepth(this.yDepth(ny + 8));
         s2.play("res_sheep-idle");
         [s1, s2].forEach((s) => {
           s.setInteractive({ cursor: "pointer" });
@@ -1096,7 +1119,7 @@ export default class MainScene extends Phaser.Scene {
       return; // vị trí không hợp lệ — giữ nguyên build mode để thử lại
     }
     const color = this.mySide === "left" ? "blue" : "red";
-    const img = this.add.image(x, y, `bld_house1_${color}`).setScale(0).setDepth(4);
+    const img = this.add.image(x, y, `bld_house1_${color}`).setScale(0).setDepth(this.yDepth(y));
     img.setInteractive({ cursor: "pointer" });
     img.setData("kind", "my-building");
     this.myBuildingPositions.push({ x, y });
@@ -1345,14 +1368,14 @@ export default class MainScene extends Phaser.Scene {
       }
 
       u.sprite.setPosition(u.x, u.y);
-      u.sprite.setDepth(10 + u.y / 1000);
+      u.sprite.setDepth(this.yDepth(u.y));
       this.drawHpBar(u.hpBar, u.x, u.y - 34, u.hp, u.maxHp, 30);
     }
 
     for (const ru of this.remoteUnits.values()) {
       ru.sprite.x = Phaser.Math.Linear(ru.sprite.x, ru.targetX, Math.min(1, dt * 6));
       ru.sprite.y = Phaser.Math.Linear(ru.sprite.y, ru.targetY, Math.min(1, dt * 6));
-      ru.sprite.setDepth(10 + ru.sprite.y / 1000);
+      ru.sprite.setDepth(this.yDepth(ru.sprite.y));
       this.drawHpBar(ru.hpBar, ru.sprite.x, ru.sprite.y - 34, ru.hp, ru.maxHp, 30);
     }
 
@@ -1391,12 +1414,22 @@ export default class MainScene extends Phaser.Scene {
 
   // Vị trí + kích thước minimap tính theo màn hình (không phải theo bản đồ) vì minimap cố định trên camera
   // Đặt góc dưới-trái theo đúng chuẩn bố cục RTS mobile (không đụng nút Settings ở trên-phải)
+  /**
+   * Depth thống nhất cho MỌI object có thể "đứng trước/sau" nhau theo chiều sâu — castle, building,
+   * mỏ tài nguyên, unit, dân. Dùng world Y (điểm chân) làm depth thay vì số cố định theo loại object,
+   * nên unit đi trước building thì che building, đi sau thì bị building che — tự nhiên theo đúng vị trí,
+   * không phải luật cứng "unit luôn ở trên" hay "building luôn ở trên".
+   */
+  private yDepth(y: number): number {
+    return 6 + y / 1000;
+  }
+
   private minimapRect() {
     const mmW = 120;
     const mmH = 82;
     const pad = 22; // đệm rộng để tránh hẳn vùng bo góc container + safe-area (notch/gesture bar)
     const mmX = pad;
-    const mmY = PORTRAIT_H - mmH - pad - 30;
+    const mmY = this.scale.height - mmH - pad - 30;
     return { mmX, mmY, mmW, mmH };
   }
 
