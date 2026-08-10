@@ -108,7 +108,6 @@ export default class MainScene extends Phaser.Scene {
   private paused = false;
   private currentWave = 1;
   private matchStartMs = 0;
-  private minimapG!: Phaser.GameObjects.Graphics;
 
   private myCastle!: Phaser.GameObjects.Image;
   private enemyCastle!: Phaser.GameObjects.Image;
@@ -141,6 +140,7 @@ export default class MainScene extends Phaser.Scene {
   private localUnits = new Map<string, LocalUnit>();
   private remoteUnits = new Map<string, RemoteUnit>();
   private lastBroadcastAt = 0;
+  private lastMinimapEmitAt = 0;
   private unitCounter = 0;
 
   constructor() {
@@ -282,6 +282,7 @@ export default class MainScene extends Phaser.Scene {
     gameEvents.on("spawn-villager", this.handleSpawnVillager, this);
     gameEvents.on("build-house", this.handleBuildHouse, this);
     gameEvents.on("cancel-build-mode", this.cancelBuildMode, this);
+    gameEvents.on("minimap-jump", this.handleMinimapJump, this);
     gameEvents.on("build-resource-house", this.handleBuildResourceHouse, this);
     gameEvents.on("toggle-pause", this.handleTogglePause, this);
     gameEvents.on("leave-room", this.handleLeave, this);
@@ -290,6 +291,7 @@ export default class MainScene extends Phaser.Scene {
       gameEvents.off("spawn-villager", this.handleSpawnVillager, this);
       gameEvents.off("build-house", this.handleBuildHouse, this);
       gameEvents.off("cancel-build-mode", this.cancelBuildMode, this);
+      gameEvents.off("minimap-jump", this.handleMinimapJump, this);
     gameEvents.off("build-resource-house", this.handleBuildResourceHouse, this);
       gameEvents.off("toggle-pause", this.handleTogglePause, this);
       gameEvents.off("leave-room", this.handleLeave, this);
@@ -297,7 +299,6 @@ export default class MainScene extends Phaser.Scene {
       this.myVillagers?.destroy();
     });
 
-    this.minimapG = this.add.graphics().setDepth(100).setScrollFactor(0);
     this.selectionRing = this.add.graphics().setDepth(12);
     this.buildingRing = this.add.graphics().setDepth(12);
     this.dragBoxG = this.add.graphics().setDepth(13);
@@ -846,12 +847,6 @@ export default class MainScene extends Phaser.Scene {
       return;
     }
     if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch, bỏ qua tap thường
-
-    // Bấm vào minimap (luôn cố định trên màn hình) → xử lý ngay, không phải world object nên không xung đột kéo camera
-    if (this.pointInMinimap(pointer.x, pointer.y)) {
-      this.jumpCameraFromMinimap(pointer.x, pointer.y);
-      return;
-    }
 
     // CHỈ ghi nhận — chưa quyết định gì. Quyết định TAP hay DRAG diễn ra ở pointerup/pointermove.
     const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
@@ -1402,7 +1397,10 @@ export default class MainScene extends Phaser.Scene {
     this.drawHpBar(this.enemyBaseBar, this.enemyCastle.x, this.enemyCastle.y - 90, this.enemyBaseHp, BASE_MAX_HP, 90);
 
     this.myVillagers?.update(dt, time);
-    this.drawMinimap();
+    if (time - this.lastMinimapEmitAt >= 130) {
+      this.lastMinimapEmitAt = time;
+      this.emitMinimapData();
+    }
     this.drawSelectionRing();
     this.emitBuildingAnchor();
 
@@ -1424,62 +1422,26 @@ export default class MainScene extends Phaser.Scene {
     return 6 + y / 1000;
   }
 
-  private minimapRect() {
-    const mmW = 120;
-    const mmH = 82;
-    const pad = 22; // đệm rộng để tránh hẳn vùng bo góc container + safe-area (notch/gesture bar)
-    const mmX = pad;
-    const mmY = this.scale.height - mmH - pad - 30;
-    return { mmX, mmY, mmW, mmH };
+  /** Phát dữ liệu minimap ra ngoài cho React vẽ bằng HTML/SVG — screen-space thật 100%,
+   * không dính camera.zoom (khác với vẽ bằng Phaser Graphics dù có scrollFactor(0) vẫn bị
+   * zoom theo camera — đó chính là lỗi minimap co giãn/lệch đã gặp). */
+  private handleMinimapJump(p: { x: number; y: number }) {
+    this.cameras.main.centerOn(p.x, p.y);
   }
 
-  private pointInMinimap(screenX: number, screenY: number): boolean {
-    const { mmX, mmY, mmW, mmH } = this.minimapRect();
-    return screenX >= mmX && screenX <= mmX + mmW && screenY >= mmY && screenY <= mmY + mmH;
-  }
-
-  private jumpCameraFromMinimap(screenX: number, screenY: number) {
-    const { mmX, mmY, mmW, mmH } = this.minimapRect();
-    const sx = (mmW - 8) / this.preset.worldW;
-    const sy = (mmH - 8) / this.preset.worldH;
-    const worldX = (screenX - mmX - 4) / sx;
-    const worldY = (screenY - mmY - 4) / sy;
-    this.cameras.main.centerOn(worldX, worldY);
-  }
-
-  private drawMinimap() {
-    const g = this.minimapG;
-    g.clear();
-    const { mmX, mmY, mmW, mmH } = this.minimapRect();
-    g.fillStyle(0x1a2e1a, 0.8);
-    g.fillRoundedRect(mmX, mmY, mmW, mmH, 6);
-    g.lineStyle(1.5, 0xe9dcbb, 0.7);
-    g.strokeRoundedRect(mmX, mmY, mmW, mmH, 6);
-
-    const sx = (mmW - 8) / this.preset.worldW;
-    const sy = (mmH - 8) / this.preset.worldH;
-    const toX = (x: number) => mmX + 4 + x * sx;
-    const toY = (y: number) => mmY + 4 + y * sy;
-
-    g.fillStyle(0x3b82f6, 1);
-    g.fillRect(toX(this.myCastle.x) - 3, toY(this.myCastle.y) - 3, 6, 6);
-    g.fillStyle(0xef4444, 1);
-    g.fillRect(toX(this.enemyCastle.x) - 3, toY(this.enemyCastle.y) - 3, 6, 6);
-
-    g.fillStyle(0x93c5fd, 1);
-    for (const u of this.localUnits.values()) g.fillCircle(toX(u.x), toY(u.y), 1.6);
-    g.fillStyle(0xfca5a5, 1);
-    for (const ru of this.remoteUnits.values()) g.fillCircle(toX(ru.sprite.x), toY(ru.sprite.y), 1.6);
-
-    // Khung chữ nhật thể hiện camera đang nhìn vùng nào trên bản đồ — bấm ra ngoài khung này để nhảy tới
+  private emitMinimapData() {
     const cam = this.cameras.main;
-    g.lineStyle(1.5, 0xffffff, 0.9);
-    g.strokeRect(
-      toX(cam.worldView.x),
-      toY(cam.worldView.y),
-      cam.worldView.width * sx,
-      cam.worldView.height * sy
-    );
+    gameEvents.emit("minimap-data", {
+      worldW: this.preset.worldW,
+      worldH: this.preset.worldH,
+      myBase: { x: this.myCastle.x, y: this.myCastle.y },
+      enemyBase: { x: this.enemyCastle.x, y: this.enemyCastle.y },
+      myUnits: Array.from(this.localUnits.values())
+        .filter((u) => u.state !== "dead")
+        .map((u) => ({ x: u.x, y: u.y })),
+      enemyUnits: Array.from(this.remoteUnits.values()).map((ru) => ({ x: ru.sprite.x, y: ru.sprite.y })),
+      camera: { x: cam.worldView.x, y: cam.worldView.y, w: cam.worldView.width, h: cam.worldView.height },
+    });
   }
 
   private drawTowerShot(x1: number, y1: number, x2: number, y2: number) {

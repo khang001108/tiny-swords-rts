@@ -60,3 +60,18 @@ export interface BuildingAnchor {
 export interface BuildModeStart {
   label: string;
 }
+
+export interface MinimapPoint {
+  x: number;
+  y: number;
+}
+
+export interface MinimapData {
+  worldW: number;
+  worldH: number;
+  myBase: MinimapPoint;
+  enemyBase: MinimapPoint;
+  myUnits: MinimapPoint[];
+  enemyUnits: MinimapPoint[];
+  camera: { x: number; y: number; w: number; h: number };
+}

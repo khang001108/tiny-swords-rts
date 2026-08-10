@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, MouseEvent } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
 import {
   gameEvents,
@@ -12,6 +12,7 @@ import {
   EndlessWaveUpdate,
   BuildingAnchor,
   BuildModeStart,
+  MinimapData,
 } from "@/game/events";
 import {
   UNIT_CONFIGS,
@@ -99,6 +100,7 @@ export default function GameCanvas({
   const [buildModeLabel, setBuildModeLabel] = useState<string | null>(null);
   const [showTutorial, setShowTutorial] = useState(true);
   const [wave, setWave] = useState(1);
+  const [minimap, setMinimap] = useState<MinimapData | null>(null);
   const [bestRecord, setBestRecord] = useState<{ wave: number; timeSec: number } | null>(null);
   const [isNewRecord, setIsNewRecord] = useState(false);
 
@@ -158,6 +160,7 @@ export default function GameCanvas({
     };
     const onBuildStart = (p: BuildModeStart) => setBuildModeLabel(p.label);
     const onBuildEnd = () => setBuildModeLabel(null);
+    const onMinimap = (p: MinimapData) => setMinimap(p);
 
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
@@ -168,6 +171,7 @@ export default function GameCanvas({
     gameEvents.on("building-anchor", onAnchor);
     gameEvents.on("build-mode-start", onBuildStart);
     gameEvents.on("build-mode-end", onBuildEnd);
+    gameEvents.on("minimap-data", onMinimap);
 
     return () => {
       gameEvents.off("hud-update", onHud);
@@ -179,6 +183,7 @@ export default function GameCanvas({
       gameEvents.off("building-anchor", onAnchor);
       gameEvents.off("build-mode-start", onBuildStart);
       gameEvents.off("build-mode-end", onBuildEnd);
+      gameEvents.off("minimap-data", onMinimap);
       gameEvents.emit("leave-room");
       game.destroy(true);
     };
@@ -427,6 +432,21 @@ export default function GameCanvas({
           )}
         </div>
 
+        {/* Minimap — HTML/SVG thật 100% screen-space, không dính camera.zoom của Phaser
+            (khác bản cũ vẽ bằng Phaser Graphics: dù setScrollFactor(0) vẫn bị camera.zoom
+            scale theo, gây lỗi minimap co giãn/lệch khi zoom). Kích thước CSS cố định luôn. */}
+        {minimap && (
+          <div
+            className="absolute left-0 bottom-0 z-20"
+            style={{
+              paddingLeft: "max(10px, env(safe-area-inset-left))",
+              paddingBottom: "max(10px, env(safe-area-inset-bottom))",
+            }}
+          >
+            <MinimapPanel data={minimap} />
+          </div>
+        )}
+
         {/* Ghi chú: gợi ý "chưa chọn gì" trước đây cố định sát đáy màn hình đã bị bỏ —
             giờ chỉ dùng đúng 1 tutorial mờ dần ở trên (24% từ đỉnh) để không che minimap/gameplay */}
       </div>
@@ -471,6 +491,53 @@ function BuildCard({
         {cost}
       </span>
     </button>
+  );
+}
+
+function MinimapPanel({ data }: { data: MinimapData }) {
+  const W = 128;
+  const H = 88;
+  const sx = (W - 8) / data.worldW;
+  const sy = (H - 8) / data.worldH;
+  const toX = (x: number) => 4 + x * sx;
+  const toY = (y: number) => 4 + y * sy;
+
+  const handleClick = (e: MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const worldX = (px - 4) / sx;
+    const worldY = (py - 4) / sy;
+    gameEvents.emit("minimap-jump", { x: worldX, y: worldY });
+  };
+
+  return (
+    <div
+      onClick={handleClick}
+      className="relative rounded-md bg-[#1a2e1a]/85 border border-[#e9dcbb]/70 shadow-lg cursor-pointer overflow-hidden"
+      style={{ width: W, height: H }}
+    >
+      <svg width={W} height={H} className="absolute inset-0">
+        <rect x={toX(data.myBase.x) - 3} y={toY(data.myBase.y) - 3} width={6} height={6} fill="#3b82f6" />
+        <rect x={toX(data.enemyBase.x) - 3} y={toY(data.enemyBase.y) - 3} width={6} height={6} fill="#ef4444" />
+        {data.myUnits.map((u, i) => (
+          <circle key={`m${i}`} cx={toX(u.x)} cy={toY(u.y)} r={1.6} fill="#93c5fd" />
+        ))}
+        {data.enemyUnits.map((u, i) => (
+          <circle key={`e${i}`} cx={toX(u.x)} cy={toY(u.y)} r={1.6} fill="#fca5a5" />
+        ))}
+        <rect
+          x={toX(data.camera.x)}
+          y={toY(data.camera.y)}
+          width={data.camera.w * sx}
+          height={data.camera.h * sy}
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth={1.5}
+          opacity={0.9}
+        />
+      </svg>
+    </div>
   );
 }
 
