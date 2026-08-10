@@ -59,6 +59,7 @@ function buildingThumb(role: BuildingRole): string {
   }
   return BUILDING_THUMB[role as Exclude<BuildingRole, `resource-${ResourceKind}`>];
 }
+const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
 
 export default function GameCanvas({
   roomCode,
@@ -91,7 +92,10 @@ export default function GameCanvas({
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
   const [paused, setPaused] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [buildingRole, setBuildingRole] = useState<BuildingRole>("castle");
+  const [hasSelection, setHasSelection] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(true);
   const [wave, setWave] = useState(1);
   const [bestRecord, setBestRecord] = useState<{ wave: number; timeSec: number } | null>(null);
   const [isNewRecord, setIsNewRecord] = useState(false);
@@ -105,6 +109,11 @@ export default function GameCanvas({
       // localStorage có thể bị chặn (chế độ riêng tư) — bỏ qua, không có kỷ lục lưu được
     }
   }, [mode]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setShowTutorial(false), 7000);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -130,7 +139,11 @@ export default function GameCanvas({
       }
     };
     const onPause = (p: PauseState) => setPaused(p.paused);
-    const onBuilding = (p: BuildingSelection) => setBuildingRole(p.role);
+    const onBuilding = (p: BuildingSelection) => {
+      setBuildingRole(p.role);
+      setHasSelection(true);
+      setShowTutorial(false);
+    };
     const onWave = (p: EndlessWaveUpdate) => setWave(p.wave);
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
@@ -154,88 +167,105 @@ export default function GameCanvas({
   const spawnVillager = () => gameEvents.emit("spawn-villager");
   const buildHouse = () => gameEvents.emit("build-house");
   const buildResourceHouse = (kind: ResourceKind) => gameEvents.emit("build-resource-house", kind);
-  const togglePause = () => gameEvents.emit("toggle-pause");
-  const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
+  const togglePause = () => {
+    gameEvents.emit("toggle-pause");
+    setSettingsOpen(false);
+  };
+
+  const atCap = hud.myUnits >= hud.popCap;
 
   return (
     <div className="w-full mx-auto" style={{ maxWidth: 460 }}>
-      <div className="rounded-lg bg-[#e9dcbb]/95 border border-black/20 shadow-md mb-2 px-3 py-1.5 flex items-center justify-between text-sm text-[#3a2c1a] flex-wrap gap-x-3 gap-y-1">
-        {mode === "online" ? (
-          <span>
-            Phòng: <span className="font-mono font-bold">{roomCode}</span>
-          </span>
-        ) : mode === "endless" ? (
-          <span className="text-[#3a2c1a]/60 flex items-center gap-1">🌊 Endless Mode</span>
-        ) : (
-          <span className="text-[#3a2c1a]/60">Chế độ: Đấu với Bot</span>
-        )}
-        <span>
-          {mode === "endless" ? (
-            <span className="text-emerald-700 font-medium">Sóng {wave}</span>
-          ) : hud.opponentConnected ? (
-            <span className="text-emerald-700 font-medium">● Đối thủ đã vào</span>
-          ) : (
-            <span className="text-amber-700 font-medium">● Đang chờ đối thủ...</span>
-          )}
-        </span>
-        <span className="flex items-center font-medium">
-          <img src={icon("swords")} className="icon-inline" alt="" />
-          {hud.myUnits}/{hud.popCap}
-        </span>
-        <span className="flex items-center font-medium">
-          <img src={icon("hammer")} className="icon-inline" alt="" />
-          Dân {hud.villagers}/{hud.villagerMax}
-        </span>
-        <span className="flex items-center font-bold text-amber-700">
-          <img src={icon("gold")} className="icon-inline" alt="" />
-          {hud.gold}
-        </span>
-        <span className="flex items-center font-bold text-lime-800">
-          <img src={icon("wood")} className="icon-inline" alt="" />
-          {hud.wood}
-        </span>
-        <span className="flex items-center font-bold text-rose-800">
-          <img src={icon("meat")} className="icon-inline" alt="" />
-          {hud.meat}
-        </span>
-        <button
-          onClick={togglePause}
-          className="ml-auto px-2.5 py-1 rounded bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 text-xs font-semibold flex items-center gap-1"
-          title={mode === "online" ? "Chỉ tạm dừng phía bạn — đối thủ vẫn tiếp tục" : "Tạm dừng"}
-        >
-          <img src={icon(paused ? "play" : "settings")} className="icon-inline m-0" alt="" />
-          {paused ? "Tiếp tục" : "Tạm dừng"}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 mb-2 px-1">
-        <BaseBar label="Căn cứ của bạn" hp={hud.myBaseHp} max={hud.myBaseMaxHp} color="bg-blue-500" icon={icon("shield")} />
-        {mode === "endless" ? (
-          <div className="text-right">
-            <div className="text-xs text-white/70 mb-0.5">Kỷ lục</div>
-            <div className="text-sm font-bold text-amber-300">
-              {bestRecord ? `Sóng ${bestRecord.wave} · ${formatTime(bestRecord.timeSec)}` : "Chưa có"}
-            </div>
-          </div>
-        ) : (
-          <BaseBar
-            label="Căn cứ đối thủ"
-            hp={hud.enemyBaseHp}
-            max={hud.enemyBaseMaxHp}
-            color="bg-red-500"
-            icon={icon("shield")}
-            align="right"
-          />
-        )}
-      </div>
-
+      {/* ══ GAME WORLD — canvas Phaser lo hết: terrain/unit/building/camera/minimap ══ */}
       <div
         ref={containerRef}
-        className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl touch-none"
-        style={{ aspectRatio: `${PORTRAIT_W} / ${PORTRAIT_H}`, maxHeight: "78vh" }}
+        className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl touch-none select-none"
+        style={{ aspectRatio: `${PORTRAIT_W} / ${PORTRAIT_H}`, maxHeight: "94vh" }}
       >
+        {/* ══ SCREEN SPACE — nổi cố định trên canvas, không di chuyển theo camera ══ */}
+
+        {/* Resource HUD — top-center */}
+        <div
+          className="absolute top-0 inset-x-0 flex justify-center z-20 pointer-events-none"
+          style={{ paddingTop: "max(8px, env(safe-area-inset-top))" }}
+        >
+          <div className="pointer-events-auto w-[86%] rounded-full bg-[#e9dcbb]/95 border border-black/25 shadow-md px-3 py-1.5 flex items-center justify-center gap-3 text-[#3a2c1a] text-xs flex-wrap">
+            <span className="flex items-center font-bold text-amber-700">
+              <img src={icon("gold")} className="icon-inline" alt="" />
+              {hud.gold}
+            </span>
+            <span className="flex items-center font-bold text-lime-800">
+              <img src={icon("wood")} className="icon-inline" alt="" />
+              {hud.wood}
+            </span>
+            <span className="flex items-center font-bold text-rose-800">
+              <img src={icon("meat")} className="icon-inline" alt="" />
+              {hud.meat}
+            </span>
+            <span className="flex items-center font-medium">
+              <img src={icon("swords")} className="icon-inline" alt="" />
+              {hud.myUnits}/{hud.popCap}
+            </span>
+            <span className="flex items-center font-medium">
+              <img src={icon("hammer")} className="icon-inline" alt="" />
+              {hud.villagers}/{hud.villagerMax}
+            </span>
+          </div>
+        </div>
+
+        {/* Settings — top-right, cố định, tách khỏi resource HUD */}
+        <div
+          className="absolute top-0 right-0 z-30"
+          style={{ paddingTop: "max(8px, env(safe-area-inset-top))", paddingRight: "max(8px, env(safe-area-inset-right))" }}
+        >
+          <button
+            onClick={() => setSettingsOpen((v) => !v)}
+            className="w-9 h-9 rounded-full bg-[#3a2c1a]/85 border border-white/30 flex items-center justify-center shadow-md active:scale-95 transition"
+          >
+            <img src={icon("settings")} className="w-5 h-5" alt="Cài đặt" />
+          </button>
+          {settingsOpen && (
+            <div className="mt-1 w-40 rounded-lg bg-[#e9dcbb] border border-black/25 shadow-lg overflow-hidden text-sm text-[#3a2c1a]">
+              <button onClick={togglePause} className="w-full text-left px-3 py-2 hover:bg-black/5 flex items-center gap-2">
+                <img src={icon(paused ? "play" : "close")} className="icon-inline m-0" alt="" />
+                {paused ? "Tiếp tục" : "Tạm dừng"}
+              </button>
+              <a href="/" className="w-full text-left px-3 py-2 hover:bg-black/5 flex items-center gap-2 border-t border-black/10">
+                <img src={icon("back")} className="icon-inline m-0" alt="" />
+                Về sảnh chờ
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Trạng thái phòng / sóng — dưới resource HUD 1 chút, không che gameplay */}
+        <div className="absolute top-11 inset-x-0 flex justify-center z-10 pointer-events-none px-3">
+          <span className="text-[11px] text-white/85 bg-black/30 rounded-full px-2.5 py-0.5 drop-shadow">
+            {mode === "online"
+              ? `Phòng ${roomCode}`
+              : mode === "endless"
+              ? `🌊 Sóng ${wave}`
+              : "Đấu với Bot"}
+            {mode !== "endless" && (
+              <span className={hud.opponentConnected ? "text-emerald-300 ml-1.5" : "text-amber-300 ml-1.5"}>
+                {hud.opponentConnected ? "● đã vào" : "● đang chờ..."}
+              </span>
+            )}
+          </span>
+        </div>
+
+        {/* Tutorial message — fade, tự ẩn khi chọn công trình đầu tiên hoặc sau vài giây */}
+        {showTutorial && !result && (
+          <div className="absolute top-20 inset-x-4 z-10 flex justify-center pointer-events-none animate-[fadeIn_0.4s_ease]">
+            <div className="pointer-events-auto max-w-[88%] bg-black/55 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
+              💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh.
+            </div>
+          </div>
+        )}
+
+        {/* Tạm dừng */}
         {paused && !result && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70">
             <div className="text-center">
               <div className="text-3xl font-extrabold text-white mb-4">⏸ Đã tạm dừng</div>
               <button onClick={togglePause} className="w-40 h-12 block mx-auto">
@@ -251,11 +281,13 @@ export default function GameCanvas({
             </div>
           </div>
         )}
+
+        {/* Kết quả trận đấu */}
         {result && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
-            <NineSlice prefix="paper" style={{ width: 340, height: mode === "endless" ? 260 : 220 }}>
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70">
+            <NineSlice prefix="paper" style={{ width: 320, height: mode === "endless" ? 250 : 210 }}>
               <div className="flex flex-col items-center gap-2 px-4">
-                <div className={`text-3xl font-extrabold ${result.youWin ? "text-emerald-700" : "text-red-700"}`}>
+                <div className={`text-2xl font-extrabold ${result.youWin ? "text-emerald-700" : "text-red-700"}`}>
                   {mode === "endless" ? "💀 ĐÃ GỤC NGÃ" : result.youWin ? "🏆 BẠN THẮNG!" : "💀 BẠN THUA"}
                 </div>
                 {mode === "endless" && result.wave !== undefined && result.timeSec !== undefined && (
@@ -277,133 +309,144 @@ export default function GameCanvas({
             </NineSlice>
           </div>
         )}
-      </div>
 
-      <div className="flex items-center gap-2 mt-3 px-1">
-        <span className="text-xs text-white/60 flex items-center gap-2">
-          Đang chọn:
-          <img src={buildingThumb(buildingRole)} className="w-6 h-6 object-contain rounded" alt="" />
-          <span className="font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
-        </span>
-      </div>
-
-      <div className="flex gap-2 mt-1.5 px-1 flex-wrap items-center">
-        {(buildingRole === "castle" || buildingRole === "barracks") &&
-          (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
-            const cfg = UNIT_CONFIGS[type];
-            const atCap = hud.myUnits >= hud.popCap;
-            const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
-            return (
-              <button
-                key={type}
-                onClick={() => spawn(type)}
-                disabled={disabled}
-                className={`h-14 min-w-[130px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
-              >
-                <NineSlice prefix="btn-blue" className="w-full h-full">
-                  <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                    {cfg.label}
-                    <span className="inline-flex items-center text-xs opacity-90">
-                      <img src={icon("gold")} className="icon-inline" alt="" />
-                      {cfg.cost}
-                    </span>
-                  </span>
-                </NineSlice>
-              </button>
-            );
-          })}
-
-        {buildingRole === "house1" && (
-          <button
-            onClick={spawnVillager}
-            disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
-            className={`h-14 min-w-[140px] transition ${
-              hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
-                ? "opacity-40 grayscale"
-                : "active:scale-[0.97]"
-            }`}
+        {/* ══ ACTION PANEL — chỉ hiện sau khi đã bấm chọn 1 công trình, đặt ở đáy màn hình ══ */}
+        {hasSelection && !result && (
+          <div
+            className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
+            style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
           >
-            <NineSlice prefix="btn-red" className="w-full h-full">
-              <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                + Dân
-                <span className="inline-flex items-center text-xs opacity-90">
-                  <img src={icon("gold")} className="icon-inline" alt="" />
-                  {VILLAGER_COST}
-                </span>
-              </span>
-            </NineSlice>
-          </button>
-        )}
+            <div className="pointer-events-auto w-full mx-2 rounded-xl bg-[#1c150c]/90 border border-white/10 shadow-xl px-2.5 py-2">
+              <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
+                <img src={buildingThumb(buildingRole)} className="w-6 h-6 object-contain rounded" alt="" />
+                <span className="text-xs font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
+              </div>
 
-        {buildingRole === "tower" && (
-          <p className="text-xs text-white/50 py-2">Tháp canh tự động bắn quân địch trong tầm — không sản xuất được.</p>
-        )}
-        {buildingRole === "monastery" && (
-          <p className="text-xs text-white/50 py-2">Tu viện — công trình trang trí, chưa có chức năng sản xuất.</p>
-        )}
-        {buildingRole.startsWith("resource-") &&
-          (() => {
-            const kind = buildingRole.replace("resource-", "") as ResourceKind;
-            const built = hud.resourceHouses[kind];
-            if (built) {
-              return (
-                <p className="text-xs text-emerald-400 py-2">
-                  ✓ Đã có nhà cạnh mỏ {RESOURCE_LABEL[kind]} — 1 dân được cấp miễn phí, tự động khai thác ở đây mãi mãi.
-                </p>
-              );
-            }
-            const disabled = hud.gold < RESOURCE_HOUSE_COST;
-            return (
-              <button
-                onClick={() => buildResourceHouse(kind)}
-                disabled={disabled}
-                className={`h-14 min-w-[190px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
-              >
-                <NineSlice prefix="btn-red" className="w-full h-full">
-                  <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                    🏠 Xây nhà cạnh mỏ {RESOURCE_LABEL[kind]}
-                    <span className="inline-flex items-center text-xs opacity-90">
-                      <img src={icon("gold")} className="icon-inline" alt="" />
-                      {RESOURCE_HOUSE_COST}
+              <div className="flex gap-1.5 flex-wrap items-center">
+                {(buildingRole === "castle" || buildingRole === "barracks") &&
+                  (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
+                    const cfg = UNIT_CONFIGS[type];
+                    const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => spawn(type)}
+                        disabled={disabled}
+                        className={`h-12 min-w-[100px] flex-1 transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
+                      >
+                        <NineSlice prefix="btn-blue" className="w-full h-full">
+                          <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                            {cfg.label}
+                            <span className="inline-flex items-center opacity-90">
+                              <img src={icon("gold")} className="icon-inline m-0" alt="" />
+                              {cfg.cost}
+                            </span>
+                          </span>
+                        </NineSlice>
+                      </button>
+                    );
+                  })}
+
+                {buildingRole === "house1" && (
+                  <button
+                    onClick={spawnVillager}
+                    disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
+                    className={`h-12 flex-1 min-w-[120px] transition ${
+                      hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
+                        ? "opacity-40 grayscale"
+                        : "active:scale-[0.97]"
+                    }`}
+                  >
+                    <NineSlice prefix="btn-red" className="w-full h-full">
+                      <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                        + Dân
+                        <span className="inline-flex items-center opacity-90">
+                          <img src={icon("gold")} className="icon-inline m-0" alt="" />
+                          {VILLAGER_COST}
+                        </span>
+                      </span>
+                    </NineSlice>
+                  </button>
+                )}
+
+                {buildingRole === "tower" && (
+                  <p className="text-[11px] text-white/60 py-1">Tháp canh tự động bắn địch trong tầm — không sản xuất.</p>
+                )}
+                {buildingRole === "monastery" && (
+                  <p className="text-[11px] text-white/60 py-1">Tu viện — công trình trang trí.</p>
+                )}
+                {buildingRole.startsWith("resource-") &&
+                  (() => {
+                    const kind = buildingRole.replace("resource-", "") as ResourceKind;
+                    const built = hud.resourceHouses[kind];
+                    if (built) {
+                      return (
+                        <p className="text-[11px] text-emerald-400 py-1">
+                          ✓ Đã có nhà — dân tự khai thác mỏ {RESOURCE_LABEL[kind]} mãi mãi.
+                        </p>
+                      );
+                    }
+                    const disabled = hud.gold < RESOURCE_HOUSE_COST;
+                    return (
+                      <button
+                        onClick={() => buildResourceHouse(kind)}
+                        disabled={disabled}
+                        className={`h-12 flex-1 min-w-[170px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
+                      >
+                        <NineSlice prefix="btn-red" className="w-full h-full">
+                          <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                            Xây nhà cạnh mỏ {RESOURCE_LABEL[kind]}
+                            <span className="inline-flex items-center opacity-90">
+                              <img src={icon("gold")} className="icon-inline m-0" alt="" />
+                              {RESOURCE_HOUSE_COST}
+                            </span>
+                          </span>
+                        </NineSlice>
+                      </button>
+                    );
+                  })()}
+
+                <button
+                  onClick={buildHouse}
+                  disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
+                  className={`h-12 flex-1 min-w-[120px] transition ${
+                    hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax
+                      ? "opacity-40 grayscale"
+                      : "active:scale-[0.97]"
+                  }`}
+                >
+                  <NineSlice prefix="btn-red" className="w-full h-full">
+                    <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                      Xây nhà ({hud.houses}/{hud.housesMax})
+                      <span className="inline-flex items-center opacity-90">
+                        <img src={icon("gold")} className="icon-inline m-0" alt="" />
+                        {HOUSE_COST}
+                      </span>
                     </span>
-                  </span>
-                </NineSlice>
-              </button>
-            );
-          })()}
+                  </NineSlice>
+                </button>
+              </div>
+              {atCap && (
+                <p className="text-[10px] text-amber-400/90 mt-1">
+                  Hết chỗ quân — xây nhà dân hoặc khai thác thêm Gỗ/Thịt để nới giới hạn.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
-        <div className="w-px h-10 bg-white/15 mx-1" />
-
-        <button
-          onClick={buildHouse}
-          disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
-          className={`h-14 min-w-[150px] transition ${
-            hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax
-              ? "opacity-40 grayscale"
-              : "active:scale-[0.97]"
-          }`}
-        >
-          <NineSlice prefix="btn-red" className="w-full h-full">
-            <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-              🏠 Xây nhà ({hud.houses}/{hud.housesMax})
-              <span className="inline-flex items-center text-xs opacity-90">
-                <img src={icon("gold")} className="icon-inline" alt="" />
-                {HOUSE_COST}
-              </span>
-            </span>
-          </NineSlice>
-        </button>
+        {/* Gợi ý khi chưa chọn gì — thay cho action panel */}
+        {!hasSelection && !result && (
+          <div
+            className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
+            style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
+          >
+            <div className="text-[11px] text-white/70 bg-black/40 rounded-full px-3 py-1.5">
+              Bấm vào Lâu đài trên bản đồ để bắt đầu xây dựng
+            </div>
+          </div>
+        )}
       </div>
-      {hud.myUnits >= hud.popCap && (
-        <p className="text-xs text-amber-400/80 mt-1 px-1">
-          Đã đạt giới hạn quân số — xây thêm nhà dân hoặc để dân khai thác thêm Gỗ/Thịt để nới giới hạn.
-        </p>
-      )}
-      <p className="text-xs text-white/40 mt-1 px-1">
-        💡 Bấm vào 1 công trình của bạn (Lâu đài/Doanh trại/Nhà dân) để chọn nơi sản xuất. Bấm vào 1 mỏ tài nguyên (cây/mỏ
-        vàng/cừu) khi chưa chọn gì để xây nhà ngay cạnh đó — dân được cấp sẽ tự động khai thác đúng mỏ đó mãi mãi. Bấm
-        lính/dân rồi bấm nơi muốn tới để ra lệnh.
-      </p>
     </div>
   );
 }
@@ -412,37 +455,4 @@ function formatTime(sec: number) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function BaseBar({
-  label,
-  hp,
-  max,
-  color,
-  icon,
-  align = "left",
-}: {
-  label: string;
-  hp: number;
-  max: number;
-  color: string;
-  icon: string;
-  align?: "left" | "right";
-}) {
-  const pct = Math.max(0, Math.min(100, (hp / max) * 100));
-  return (
-    <div className={align === "right" ? "text-right" : ""}>
-      <div className={`text-xs text-white/70 mb-0.5 flex items-center gap-1 ${align === "right" ? "justify-end" : ""}`}>
-        {align === "left" && <img src={icon} className="icon-inline" alt="" />}
-        {label} — {Math.ceil(hp)}/{max}
-        {align === "right" && <img src={icon} className="icon-inline" alt="" />}
-      </div>
-      <div className="h-2.5 w-full bg-white/10 rounded overflow-hidden border border-black/20">
-        <div
-          className={`h-full ${color}`}
-          style={{ width: `${pct}%`, marginLeft: align === "right" ? `${100 - pct}%` : 0 }}
-        />
-      </div>
-    </div>
-  );
 }

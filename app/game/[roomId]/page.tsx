@@ -23,7 +23,15 @@ export default function GameRoomPage({ params }: { params: { roomId: string } })
   const mapSize: MapSize = mode === "online" ? mapSizeFromRoomCode(params.roomId) : mapParam ?? "medium";
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center py-6 px-2">
+    <main
+      className="min-h-screen flex flex-col items-center justify-center bg-[#0e1a0e]"
+      style={{
+        paddingTop: "max(6px, env(safe-area-inset-top))",
+        paddingBottom: "max(6px, env(safe-area-inset-bottom))",
+        paddingLeft: "max(4px, env(safe-area-inset-left))",
+        paddingRight: "max(4px, env(safe-area-inset-right))",
+      }}
+    >
       <GameCanvas roomCode={params.roomId.toUpperCase()} isHost={isHost} mode={mode} mapSize={mapSize} />
     </main>
   );

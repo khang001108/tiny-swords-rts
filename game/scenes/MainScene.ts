@@ -27,6 +27,7 @@ import {
   MapSize,
   computePopCap,
   PORTRAIT_W,
+  PORTRAIT_H,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
   STARTING_GOLD,
@@ -120,6 +121,8 @@ export default class MainScene extends Phaser.Scene {
   private dragStartScreen: { x: number; y: number } | null = null;
   private isDragging = false;
   private isPanning = false;
+  private pinchStartDist = 0;
+  private pinchStartZoom = 1;
   private dragBoxG!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
@@ -288,6 +291,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectionRing = this.add.graphics().setDepth(12);
     this.buildingRing = this.add.graphics().setDepth(12);
     this.dragBoxG = this.add.graphics().setDepth(13);
+    this.input.addPointer(2); // cho phép theo dõi 2 ngón tay cùng lúc để pinch-zoom
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.input.on("pointermove", this.handlePointerMove, this);
     this.input.on("pointerup", this.handlePointerUp, this);
@@ -746,8 +750,32 @@ export default class MainScene extends Phaser.Scene {
   }
 
   // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh (hỗ trợ kéo-chọn nhiều) ──
+  private handlePinchZoom() {
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    if (p1?.isDown && p2?.isDown) {
+      const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+      if (this.pinchStartDist === 0) {
+        this.pinchStartDist = dist;
+        this.pinchStartZoom = this.cameras.main.zoom;
+        // 2 ngón đang giữ → huỷ mọi thao tác kéo/chọn 1 ngón đang dở dang
+        this.dragStart = null;
+        this.isDragging = false;
+        this.isPanning = false;
+        this.dragBoxG.clear();
+      } else {
+        const scale = dist / this.pinchStartDist;
+        const newZoom = Phaser.Math.Clamp(this.pinchStartZoom * scale, 0.55, 1.8);
+        this.cameras.main.setZoom(newZoom);
+      }
+    } else {
+      this.pinchStartDist = 0;
+    }
+  }
+
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
+    if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch, bỏ qua tap thường
 
     // Bấm vào minimap (luôn cố định trên màn hình) → camera nhảy tới đúng vị trí đó trên bản đồ lớn
     if (this.pointInMinimap(pointer.x, pointer.y)) {
@@ -805,6 +833,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch bằng 2 ngón — camera do handlePinchZoom lo
     if (!this.dragStart || !pointer.isDown) return;
     const isTouch = pointer.wasTouch;
 
@@ -814,8 +843,8 @@ export default class MainScene extends Phaser.Scene {
       if (!this.isPanning && Math.hypot(dxScreen, dyScreen) > 6) this.isPanning = true;
       if (this.isPanning) {
         const cam = this.cameras.main;
-        cam.scrollX -= pointer.x - pointer.prevPosition.x;
-        cam.scrollY -= pointer.y - pointer.prevPosition.y;
+        cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
+        cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
       }
       return;
     }
@@ -1105,6 +1134,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    this.handlePinchZoom();
     if (this.gameOver || this.paused) return;
     const dt = delta / 1000;
     const enemyBaseX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
@@ -1233,12 +1263,13 @@ export default class MainScene extends Phaser.Scene {
   }
 
   // Vị trí + kích thước minimap tính theo màn hình (không phải theo bản đồ) vì minimap cố định trên camera
+  // Đặt góc dưới-trái theo đúng chuẩn bố cục RTS mobile (không đụng nút Settings ở trên-phải)
   private minimapRect() {
     const mmW = 150;
     const mmH = 100;
     const pad = 10;
-    const mmX = PORTRAIT_W - mmW - pad;
-    const mmY = pad;
+    const mmX = pad;
+    const mmY = PORTRAIT_H - mmH - pad - 90; // chừa chỗ cho action panel phía dưới cùng
     return { mmX, mmY, mmW, mmH };
   }
 
