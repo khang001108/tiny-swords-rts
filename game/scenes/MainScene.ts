@@ -18,7 +18,6 @@ import {
   HOUSE_COST,
   HOUSE_MAX_COUNT,
   HOUSE_POP_BONUS,
-  HOUSE_SLOTS,
   HOUSE_VILLAGER_BONUS,
   RESOURCE_HOUSE_COST,
   RESOURCE_HOUSE_POP_BONUS,
@@ -100,6 +99,9 @@ export default class MainScene extends Phaser.Scene {
   private myNodePosSaved: NodePositions | null = null;
   private housesBuilt = 0;
   private resourceHouses: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
+  private buildMode: "house" | null = null;
+  private ghostSprite: Phaser.GameObjects.Image | null = null;
+  private myBuildingPositions: { x: number; y: number }[] = [];
   private paused = false;
   private currentWave = 1;
   private matchStartMs = 0;
@@ -273,6 +275,7 @@ export default class MainScene extends Phaser.Scene {
     gameEvents.on("spawn-unit", this.handleSpawnRequest, this);
     gameEvents.on("spawn-villager", this.handleSpawnVillager, this);
     gameEvents.on("build-house", this.handleBuildHouse, this);
+    gameEvents.on("cancel-build-mode", this.cancelBuildMode, this);
     gameEvents.on("build-resource-house", this.handleBuildResourceHouse, this);
     gameEvents.on("toggle-pause", this.handleTogglePause, this);
     gameEvents.on("leave-room", this.handleLeave, this);
@@ -280,6 +283,7 @@ export default class MainScene extends Phaser.Scene {
       gameEvents.off("spawn-unit", this.handleSpawnRequest, this);
       gameEvents.off("spawn-villager", this.handleSpawnVillager, this);
       gameEvents.off("build-house", this.handleBuildHouse, this);
+      gameEvents.off("cancel-build-mode", this.cancelBuildMode, this);
     gameEvents.off("build-resource-house", this.handleBuildResourceHouse, this);
       gameEvents.off("toggle-pause", this.handleTogglePause, this);
       gameEvents.off("leave-room", this.handleLeave, this);
@@ -318,6 +322,7 @@ export default class MainScene extends Phaser.Scene {
   private handleTogglePause() {
     if (this.gameOver) return;
     this.paused = !this.paused;
+    if (this.paused && this.buildMode) this.cancelBuildMode();
     this.sync?.setPaused?.(this.paused);
     gameEvents.emit("pause-state", { paused: this.paused });
   }
@@ -361,6 +366,7 @@ export default class MainScene extends Phaser.Scene {
     const enemyX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
     const midY = this.preset.worldH / 2;
     this.myBasePos = { x: myX, y: midY };
+    this.myBuildingPositions.push({ x: myX, y: midY });
     this.myCastle.setPosition(myX, midY);
     this.enemyCastle.setPosition(enemyX, midY);
     this.enemyCastle.setFlipX(this.mySide === "right");
@@ -403,6 +409,7 @@ export default class MainScene extends Phaser.Scene {
       myImg.setInteractive({ cursor: "pointer" });
       myImg.setData("kind", "my-building");
       myImg.setData("role", b);
+      this.myBuildingPositions.push({ x: myBx, y: by });
 
       if (b === "tower") {
         this.myTowerPos = { x: myBx, y: by };
@@ -775,6 +782,10 @@ export default class MainScene extends Phaser.Scene {
 
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
+    if (this.buildMode) {
+      this.confirmBuildPlacement(pointer.worldX, pointer.worldY);
+      return;
+    }
     if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch, bỏ qua tap thường
 
     // Bấm vào minimap (luôn cố định trên màn hình) → camera nhảy tới đúng vị trí đó trên bản đồ lớn
@@ -785,6 +796,12 @@ export default class MainScene extends Phaser.Scene {
 
     const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
     const hit = hits[0];
+
+    if (!hit && this.selected.length === 0 && this.selectedBuildingPos) {
+      // Bấm ra vùng trống khi đang chọn 1 công trình → bỏ chọn, đóng build menu
+      this.selectedBuildingPos = null;
+      gameEvents.emit("deselect-building");
+    }
 
     if (hit) {
       const kind = hit.getData("kind");
@@ -833,6 +850,12 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (this.buildMode && this.ghostSprite) {
+      this.ghostSprite.setPosition(pointer.worldX, pointer.worldY);
+      const valid = this.isValidBuildSpot(pointer.worldX, pointer.worldY);
+      this.ghostSprite.setTint(valid ? 0xffffff : 0xff8888);
+      return;
+    }
     if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch bằng 2 ngón — camera do handlePinchZoom lo
     if (!this.dragStart || !pointer.isDown) return;
     const isTouch = pointer.wasTouch;
@@ -932,14 +955,7 @@ export default class MainScene extends Phaser.Scene {
     this.selectionRing.clear();
     this.buildingRing.clear();
     if (this.selectedBuildingPos) {
-      this.buildingRing.lineStyle(2, 0xfacc15, 0.9);
-      this.buildingRing.strokeRoundedRect(
-        this.selectedBuildingPos.x - 40,
-        this.selectedBuildingPos.y - 40,
-        80,
-        80,
-        8
-      );
+      this.drawCornerBrackets(this.buildingRing, this.selectedBuildingPos.x, this.selectedBuildingPos.y, 46, 0xfacc15);
     }
     if (!this.selected.length) return;
     const stillAlive: { kind: "unit" | "villager"; id: string }[] = [];
@@ -960,6 +976,31 @@ export default class MainScene extends Phaser.Scene {
     this.selected = stillAlive;
   }
 
+  /** Vẽ 4 góc đánh dấu quanh 1 điểm — kiểu "selection corners" chuẩn RTS thay vì khung chữ nhật kín */
+  private drawCornerBrackets(g: Phaser.GameObjects.Graphics, cx: number, cy: number, half: number, color: number) {
+    g.lineStyle(3, color, 0.95);
+    const len = half * 0.55;
+    const corners: [number, number, number, number][] = [
+      [cx - half, cy - half, 1, 1],
+      [cx + half, cy - half, -1, 1],
+      [cx - half, cy + half, 1, -1],
+      [cx + half, cy + half, -1, -1],
+    ];
+    for (const [x, y, dx, dy] of corners) {
+      g.lineBetween(x, y, x + len * dx, y);
+      g.lineBetween(x, y, x, y + len * dy);
+    }
+  }
+
+  private emitBuildingAnchor() {
+    if (!this.selectedBuildingPos) return;
+    const cam = this.cameras.main;
+    const sx = (this.selectedBuildingPos.x - cam.worldView.x) * cam.zoom;
+    const sy = (this.selectedBuildingPos.y - cam.worldView.y) * cam.zoom;
+    const flip = sy < 190;
+    gameEvents.emit("building-anchor", { x: sx, y: sy, flip });
+  }
+
   // ── Spawn ──────────────────────────────────────────────────────────
   private handleSpawnVillager() {
     if (this.gameOver || !this.myVillagers || !this.myVillagers.canAdd()) return;
@@ -970,23 +1011,57 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private handleBuildHouse() {
-    if (this.gameOver || this.housesBuilt >= HOUSE_MAX_COUNT) return;
+    if (this.gameOver || this.housesBuilt >= HOUSE_MAX_COUNT || this.buildMode) return;
     if (this.gold < HOUSE_COST) return;
-    this.gold -= HOUSE_COST;
-    const slot = HOUSE_SLOTS[this.housesBuilt];
-    const dirMine = this.mySide === "left" ? -1 : 1;
-    const hx = this.myBasePos.x + dirMine * slot.offsetX;
-    const hy = this.myBasePos.y + slot.offsetY;
+    this.buildMode = "house";
     const color = this.mySide === "left" ? "blue" : "red";
-    const img = this.add.image(hx, hy, `bld_house1_${color}`).setScale(0).setDepth(4);
+    this.ghostSprite = this.add
+      .image(this.myBasePos.x, this.myBasePos.y, `bld_house1_${color}`)
+      .setScale(0.4)
+      .setAlpha(0.6)
+      .setDepth(50);
+    gameEvents.emit("build-mode-start", { label: "Nhà dân" });
+  }
+
+  private isValidBuildSpot(x: number, y: number): boolean {
+    if (this.riverBand && x > this.riverBand.xMin - 24 && x < this.riverBand.xMax + 24) return false;
+    const distBase = Phaser.Math.Distance.Between(x, y, this.myBasePos.x, this.myBasePos.y);
+    if (distBase > 280) return false;
+    for (const p of this.myBuildingPositions) {
+      if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 55) return false;
+    }
+    return true;
+  }
+
+  private confirmBuildPlacement(x: number, y: number) {
+    if (!this.buildMode) return;
+    if (!this.isValidBuildSpot(x, y)) {
+      if (this.ghostSprite) {
+        this.ghostSprite.setTintFill(0xff2222);
+        this.time.delayedCall(160, () => this.ghostSprite?.clearTint());
+      }
+      return; // vị trí không hợp lệ — giữ nguyên build mode để thử lại
+    }
+    this.gold -= HOUSE_COST;
+    const color = this.mySide === "left" ? "blue" : "red";
+    const img = this.add.image(x, y, `bld_house1_${color}`).setScale(0).setDepth(4);
     img.setInteractive({ cursor: "pointer" });
     img.setData("kind", "my-building");
     img.setData("role", "house1");
-    this.tweens.add({ targets: img, scale: 0.4, duration: 260, ease: "Back.Out" });
+    this.tweens.add({ targets: img, scale: 0.4, duration: 240, ease: "Back.Out" });
+    this.myBuildingPositions.push({ x, y });
     this.housesBuilt++;
     this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
     this.recomputePopCap();
+    this.cancelBuildMode();
     this.emitHud();
+  }
+
+  private cancelBuildMode() {
+    this.ghostSprite?.destroy();
+    this.ghostSprite = null;
+    this.buildMode = null;
+    gameEvents.emit("build-mode-end");
   }
 
   private handleBuildResourceHouse(kind: ResourceKind) {
@@ -999,6 +1074,7 @@ export default class MainScene extends Phaser.Scene {
     const color = this.mySide === "left" ? "blue" : "red";
     const img = this.add.image(node.x + 26, node.y - 22, `bld_house1_${color}`).setScale(0).setDepth(4);
     this.tweens.add({ targets: img, scale: 0.3, duration: 240, ease: "Back.Out" });
+    this.myBuildingPositions.push({ x: node.x + 26, y: node.y - 22 });
 
     this.myVillagers?.increaseMax(1);
     this.myVillagers?.addVillager(kind); // dân miễn phí, đi thẳng vào đúng mỏ này
@@ -1255,6 +1331,7 @@ export default class MainScene extends Phaser.Scene {
     this.myVillagers?.update(dt, time);
     this.drawMinimap();
     this.drawSelectionRing();
+    this.emitBuildingAnchor();
 
     if (time - this.lastBroadcastAt >= STATE_BROADCAST_MS) {
       this.lastBroadcastAt = time;

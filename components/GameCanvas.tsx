@@ -10,6 +10,8 @@ import {
   BuildingSelection,
   BuildingRole,
   EndlessWaveUpdate,
+  BuildingAnchor,
+  BuildModeStart,
 } from "@/game/events";
 import {
   UNIT_CONFIGS,
@@ -73,6 +75,7 @@ export default function GameCanvas({
   mapSize: MapSize;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudUpdate>({
     gold: 0,
     wood: 0,
@@ -95,6 +98,7 @@ export default function GameCanvas({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [buildingRole, setBuildingRole] = useState<BuildingRole>("castle");
   const [hasSelection, setHasSelection] = useState(false);
+  const [buildModeLabel, setBuildModeLabel] = useState<string | null>(null);
   const [showTutorial, setShowTutorial] = useState(true);
   const [wave, setWave] = useState(1);
   const [bestRecord, setBestRecord] = useState<{ wave: number; timeSec: number } | null>(null);
@@ -144,19 +148,39 @@ export default function GameCanvas({
       setHasSelection(true);
       setShowTutorial(false);
     };
+    const onDeselect = () => setHasSelection(false);
     const onWave = (p: EndlessWaveUpdate) => setWave(p.wave);
+    const onAnchor = (p: BuildingAnchor) => {
+      const el = panelRef.current;
+      if (!el) return;
+      el.style.left = `${p.x}px`;
+      el.style.top = `${p.flip ? p.y + 44 : p.y - 44}px`;
+      el.style.transform = p.flip ? "translate(-50%, 0)" : "translate(-50%, -100%)";
+      el.style.opacity = "1";
+    };
+    const onBuildStart = (p: BuildModeStart) => setBuildModeLabel(p.label);
+    const onBuildEnd = () => setBuildModeLabel(null);
+
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
     gameEvents.on("pause-state", onPause);
     gameEvents.on("select-building", onBuilding);
+    gameEvents.on("deselect-building", onDeselect);
     gameEvents.on("endless-wave", onWave);
+    gameEvents.on("building-anchor", onAnchor);
+    gameEvents.on("build-mode-start", onBuildStart);
+    gameEvents.on("build-mode-end", onBuildEnd);
 
     return () => {
       gameEvents.off("hud-update", onHud);
       gameEvents.off("game-end", onEnd);
       gameEvents.off("pause-state", onPause);
       gameEvents.off("select-building", onBuilding);
+      gameEvents.off("deselect-building", onDeselect);
       gameEvents.off("endless-wave", onWave);
+      gameEvents.off("building-anchor", onAnchor);
+      gameEvents.off("build-mode-start", onBuildStart);
+      gameEvents.off("build-mode-end", onBuildEnd);
       gameEvents.emit("leave-room");
       game.destroy(true);
     };
@@ -167,6 +191,7 @@ export default function GameCanvas({
   const spawnVillager = () => gameEvents.emit("spawn-villager");
   const buildHouse = () => gameEvents.emit("build-house");
   const buildResourceHouse = (kind: ResourceKind) => gameEvents.emit("build-resource-house", kind);
+  const cancelBuildMode = () => gameEvents.emit("cancel-build-mode");
   const togglePause = () => {
     gameEvents.emit("toggle-pause");
     setSettingsOpen(false);
@@ -182,9 +207,8 @@ export default function GameCanvas({
         className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl touch-none select-none"
         style={{ aspectRatio: `${PORTRAIT_W} / ${PORTRAIT_H}`, maxHeight: "94vh" }}
       >
-        {/* ══ SCREEN SPACE — nổi cố định trên canvas, không di chuyển theo camera ══ */}
+        {/* ══ SCREEN SPACE cố định ══ */}
 
-        {/* Resource HUD — top-center */}
         <div
           className="absolute top-0 inset-x-0 flex justify-center z-20 pointer-events-none"
           style={{ paddingTop: "max(8px, env(safe-area-inset-top))" }}
@@ -213,7 +237,6 @@ export default function GameCanvas({
           </div>
         </div>
 
-        {/* Settings — top-right, cố định, tách khỏi resource HUD */}
         <div
           className="absolute top-0 right-0 z-30"
           style={{ paddingTop: "max(8px, env(safe-area-inset-top))", paddingRight: "max(8px, env(safe-area-inset-right))" }}
@@ -238,14 +261,9 @@ export default function GameCanvas({
           )}
         </div>
 
-        {/* Trạng thái phòng / sóng — dưới resource HUD 1 chút, không che gameplay */}
         <div className="absolute top-11 inset-x-0 flex justify-center z-10 pointer-events-none px-3">
           <span className="text-[11px] text-white/85 bg-black/30 rounded-full px-2.5 py-0.5 drop-shadow">
-            {mode === "online"
-              ? `Phòng ${roomCode}`
-              : mode === "endless"
-              ? `🌊 Sóng ${wave}`
-              : "Đấu với Bot"}
+            {mode === "online" ? `Phòng ${roomCode}` : mode === "endless" ? `🌊 Sóng ${wave}` : "Đấu với Bot"}
             {mode !== "endless" && (
               <span className={hud.opponentConnected ? "text-emerald-300 ml-1.5" : "text-amber-300 ml-1.5"}>
                 {hud.opponentConnected ? "● đã vào" : "● đang chờ..."}
@@ -254,7 +272,6 @@ export default function GameCanvas({
           </span>
         </div>
 
-        {/* Tutorial message — fade, tự ẩn khi chọn công trình đầu tiên hoặc sau vài giây */}
         {showTutorial && !result && (
           <div className="absolute top-20 inset-x-4 z-10 flex justify-center pointer-events-none animate-[fadeIn_0.4s_ease]">
             <div className="pointer-events-auto max-w-[88%] bg-black/55 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
@@ -263,7 +280,20 @@ export default function GameCanvas({
           </div>
         )}
 
-        {/* Tạm dừng */}
+        {/* Đang đặt công trình (ghost preview theo dõi trong canvas, đây chỉ là thanh trạng thái + nút huỷ) */}
+        {buildModeLabel && (
+          <div className="absolute top-20 inset-x-4 z-30 flex justify-center pointer-events-none">
+            <div className="pointer-events-auto flex items-center gap-2 bg-black/70 text-white text-xs rounded-full pl-3 pr-1.5 py-1.5 shadow-lg border border-white/10">
+              <span>
+                Đang đặt <b>{buildModeLabel}</b> — bấm vào bản đồ để đặt
+              </span>
+              <button onClick={cancelBuildMode} className="w-6 h-6 rounded-full bg-white/15 flex items-center justify-center">
+                <img src={icon("close")} className="w-3.5 h-3.5" alt="Huỷ" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {paused && !result && (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70">
             <div className="text-center">
@@ -282,7 +312,6 @@ export default function GameCanvas({
           </div>
         )}
 
-        {/* Kết quả trận đấu */}
         {result && (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70">
             <NineSlice prefix="paper" style={{ width: 320, height: mode === "endless" ? 250 : 210 }}>
@@ -310,70 +339,52 @@ export default function GameCanvas({
           </div>
         )}
 
-        {/* ══ ACTION PANEL — chỉ hiện sau khi đã bấm chọn 1 công trình, đặt ở đáy màn hình ══ */}
-        {hasSelection && !result && (
-          <div
-            className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
-            style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
-          >
-            <div className="pointer-events-auto w-full mx-2 rounded-xl bg-[#1c150c]/90 border border-white/10 shadow-xl px-2.5 py-2">
+        {/* ══ CONTEXTUAL WORLD UI — build menu bám theo đúng vị trí công trình trên world, không cố định đáy màn hình ══ */}
+        <div
+          ref={panelRef}
+          className="absolute z-20 pointer-events-none transition-opacity duration-150"
+          style={{ opacity: 0, left: "50%", top: "50%" }}
+        >
+          {hasSelection && !result && !buildModeLabel && (
+            <div className="pointer-events-auto rounded-xl bg-[#1c150c]/92 border border-white/10 shadow-xl px-2 py-1.5 w-[280px]">
               <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
-                <img src={buildingThumb(buildingRole)} className="w-6 h-6 object-contain rounded" alt="" />
-                <span className="text-xs font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
+                <img src={buildingThumb(buildingRole)} className="w-5 h-5 object-contain rounded" alt="" />
+                <span className="text-[11px] font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
               </div>
 
-              <div className="flex gap-1.5 flex-wrap items-center">
+              <div className="flex gap-1.5 flex-wrap items-start">
                 {(buildingRole === "castle" || buildingRole === "barracks") &&
                   (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
                     const cfg = UNIT_CONFIGS[type];
                     const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
                     return (
-                      <button
+                      <BuildCard
                         key={type}
-                        onClick={() => spawn(type)}
+                        img={`/assets/ui9/unit-${type}.png`}
+                        fallbackIcon="swords"
+                        label={cfg.label}
+                        cost={cfg.cost}
                         disabled={disabled}
-                        className={`h-12 min-w-[100px] flex-1 transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
-                      >
-                        <NineSlice prefix="btn-blue" className="w-full h-full">
-                          <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                            {cfg.label}
-                            <span className="inline-flex items-center opacity-90">
-                              <img src={icon("gold")} className="icon-inline m-0" alt="" />
-                              {cfg.cost}
-                            </span>
-                          </span>
-                        </NineSlice>
-                      </button>
+                        onClick={() => spawn(type)}
+                      />
                     );
                   })}
 
                 {buildingRole === "house1" && (
-                  <button
-                    onClick={spawnVillager}
+                  <BuildCard
+                    fallbackIcon="hammer"
+                    label="+ Dân"
+                    cost={VILLAGER_COST}
                     disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
-                    className={`h-12 flex-1 min-w-[120px] transition ${
-                      hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax
-                        ? "opacity-40 grayscale"
-                        : "active:scale-[0.97]"
-                    }`}
-                  >
-                    <NineSlice prefix="btn-red" className="w-full h-full">
-                      <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                        + Dân
-                        <span className="inline-flex items-center opacity-90">
-                          <img src={icon("gold")} className="icon-inline m-0" alt="" />
-                          {VILLAGER_COST}
-                        </span>
-                      </span>
-                    </NineSlice>
-                  </button>
+                    onClick={spawnVillager}
+                  />
                 )}
 
                 {buildingRole === "tower" && (
-                  <p className="text-[11px] text-white/60 py-1">Tháp canh tự động bắn địch trong tầm — không sản xuất.</p>
+                  <p className="text-[10px] text-white/60 py-1 w-full">Tự động bắn địch trong tầm — không sản xuất.</p>
                 )}
                 {buildingRole === "monastery" && (
-                  <p className="text-[11px] text-white/60 py-1">Tu viện — công trình trang trí.</p>
+                  <p className="text-[10px] text-white/60 py-1 w-full">Công trình trang trí.</p>
                 )}
                 {buildingRole.startsWith("resource-") &&
                   (() => {
@@ -381,62 +392,41 @@ export default function GameCanvas({
                     const built = hud.resourceHouses[kind];
                     if (built) {
                       return (
-                        <p className="text-[11px] text-emerald-400 py-1">
+                        <p className="text-[10px] text-emerald-400 py-1 w-full">
                           ✓ Đã có nhà — dân tự khai thác mỏ {RESOURCE_LABEL[kind]} mãi mãi.
                         </p>
                       );
                     }
-                    const disabled = hud.gold < RESOURCE_HOUSE_COST;
                     return (
-                      <button
+                      <BuildCard
+                        fallbackIcon="hammer"
+                        label={`Nhà ${RESOURCE_LABEL[kind]}`}
+                        cost={RESOURCE_HOUSE_COST}
+                        disabled={hud.gold < RESOURCE_HOUSE_COST}
                         onClick={() => buildResourceHouse(kind)}
-                        disabled={disabled}
-                        className={`h-12 flex-1 min-w-[170px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
-                      >
-                        <NineSlice prefix="btn-red" className="w-full h-full">
-                          <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                            Xây nhà cạnh mỏ {RESOURCE_LABEL[kind]}
-                            <span className="inline-flex items-center opacity-90">
-                              <img src={icon("gold")} className="icon-inline m-0" alt="" />
-                              {RESOURCE_HOUSE_COST}
-                            </span>
-                          </span>
-                        </NineSlice>
-                      </button>
+                      />
                     );
                   })()}
 
-                <button
-                  onClick={buildHouse}
-                  disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
-                  className={`h-12 flex-1 min-w-[120px] transition ${
-                    hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax
-                      ? "opacity-40 grayscale"
-                      : "active:scale-[0.97]"
-                  }`}
-                >
-                  <NineSlice prefix="btn-red" className="w-full h-full">
-                    <span className="font-semibold text-white text-xs px-1.5 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
-                      Xây nhà ({hud.houses}/{hud.housesMax})
-                      <span className="inline-flex items-center opacity-90">
-                        <img src={icon("gold")} className="icon-inline m-0" alt="" />
-                        {HOUSE_COST}
-                      </span>
-                    </span>
-                  </NineSlice>
-                </button>
+                {(buildingRole === "castle" || buildingRole === "barracks") && (
+                  <BuildCard
+                    img="/assets/buildings/House1_Blue.png"
+                    fallbackIcon="hammer"
+                    label="Xây nhà"
+                    cost={HOUSE_COST}
+                    disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
+                    onClick={buildHouse}
+                  />
+                )}
               </div>
-              {atCap && (
-                <p className="text-[10px] text-amber-400/90 mt-1">
-                  Hết chỗ quân — xây nhà dân hoặc khai thác thêm Gỗ/Thịt để nới giới hạn.
-                </p>
+              {atCap && (buildingRole === "castle" || buildingRole === "barracks") && (
+                <p className="text-[9px] text-amber-400/90 mt-1">Hết chỗ quân — xây nhà hoặc khai thác thêm tài nguyên.</p>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Gợi ý khi chưa chọn gì — thay cho action panel */}
-        {!hasSelection && !result && (
+        {!hasSelection && !result && !buildModeLabel && (
           <div
             className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
             style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
@@ -448,6 +438,46 @@ export default function GameCanvas({
         )}
       </div>
     </div>
+  );
+}
+
+/** 1 ô/card building trong build menu — mờ + không bấm được nếu chưa đủ điều kiện, vẫn thấy sprite thật */
+function BuildCard({
+  img,
+  fallbackIcon,
+  label,
+  cost,
+  disabled,
+  onClick,
+}: {
+  img?: string;
+  fallbackIcon: string;
+  label: string;
+  cost: number;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative w-[60px] h-[60px] rounded-lg border flex flex-col items-center justify-center gap-0.5 transition ${
+        disabled
+          ? "opacity-45 grayscale bg-white/5 border-white/10"
+          : "bg-white/10 border-white/25 active:scale-95 hover:bg-white/15"
+      }`}
+    >
+      {img ? (
+        <img src={img} className="w-7 h-7 object-contain" alt="" />
+      ) : (
+        <img src={icon(fallbackIcon)} className="w-5 h-5 object-contain" alt="" />
+      )}
+      <span className="text-[8px] text-white/90 leading-none text-center px-0.5">{label}</span>
+      <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold text-amber-300 bg-black/50 rounded px-1 flex items-center">
+        <img src={icon("gold")} className="w-2.5 h-2.5 mr-0.5" alt="" />
+        {cost}
+      </span>
+    </button>
   );
 }
 
