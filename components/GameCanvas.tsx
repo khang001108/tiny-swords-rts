@@ -115,7 +115,7 @@ export default function GameCanvas({
   }, [mode]);
 
   useEffect(() => {
-    const t = setTimeout(() => setShowTutorial(false), 7000);
+    const t = setTimeout(() => setShowTutorial(false), 9000);
     return () => clearTimeout(t);
   }, []);
 
@@ -213,7 +213,7 @@ export default function GameCanvas({
           className="absolute top-0 inset-x-0 flex justify-center z-20 pointer-events-none"
           style={{ paddingTop: "max(8px, env(safe-area-inset-top))" }}
         >
-          <div className="pointer-events-auto w-[86%] rounded-full bg-[#e9dcbb]/95 border border-black/25 shadow-md px-3 py-1.5 flex items-center justify-center gap-3 text-[#3a2c1a] text-xs flex-wrap">
+          <div className="pointer-events-auto w-[82%] rounded-full bg-[#e9dcbb]/95 border border-black/25 shadow-md px-2.5 py-1 flex items-center justify-center gap-2.5 text-[#3a2c1a] text-[11px] flex-wrap">
             <span className="flex items-center font-bold text-amber-700">
               <img src={icon("gold")} className="icon-inline" alt="" />
               {hud.gold}
@@ -243,9 +243,9 @@ export default function GameCanvas({
         >
           <button
             onClick={() => setSettingsOpen((v) => !v)}
-            className="w-9 h-9 rounded-full bg-[#3a2c1a]/85 border border-white/30 flex items-center justify-center shadow-md active:scale-95 transition"
+            className="w-7 h-7 rounded-full bg-[#3a2c1a]/85 border border-white/30 flex items-center justify-center shadow-md active:scale-95 transition"
           >
-            <img src={icon("settings")} className="w-5 h-5" alt="Cài đặt" />
+            <img src={icon("settings")} className="w-4 h-4" alt="Cài đặt" />
           </button>
           {settingsOpen && (
             <div className="mt-1 w-40 rounded-lg bg-[#e9dcbb] border border-black/25 shadow-lg overflow-hidden text-sm text-[#3a2c1a]">
@@ -261,7 +261,7 @@ export default function GameCanvas({
           )}
         </div>
 
-        <div className="absolute top-11 inset-x-0 flex justify-center z-10 pointer-events-none px-3">
+        <div className="absolute top-10 inset-x-0 flex justify-center z-10 pointer-events-none px-3">
           <span className="text-[11px] text-white/85 bg-black/30 rounded-full px-2.5 py-0.5 drop-shadow">
             {mode === "online" ? `Phòng ${roomCode}` : mode === "endless" ? `🌊 Sóng ${wave}` : "Đấu với Bot"}
             {mode !== "endless" && (
@@ -273,8 +273,11 @@ export default function GameCanvas({
         </div>
 
         {showTutorial && !result && (
-          <div className="absolute top-20 inset-x-4 z-10 flex justify-center pointer-events-none animate-[fadeIn_0.4s_ease]">
-            <div className="pointer-events-auto max-w-[88%] bg-black/55 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
+          <div
+            className="absolute inset-x-4 z-10 flex justify-center pointer-events-none animate-[fadeIn_0.4s_ease]"
+            style={{ top: "24%" }}
+          >
+            <div className="pointer-events-auto max-w-[88%] bg-black/60 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
               💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh.
             </div>
           </div>
@@ -282,7 +285,7 @@ export default function GameCanvas({
 
         {/* Đang đặt công trình (ghost preview theo dõi trong canvas, đây chỉ là thanh trạng thái + nút huỷ) */}
         {buildModeLabel && (
-          <div className="absolute top-20 inset-x-4 z-30 flex justify-center pointer-events-none">
+          <div className="absolute inset-x-4 z-30 flex justify-center pointer-events-none" style={{ top: "24%" }}>
             <div className="pointer-events-auto flex items-center gap-2 bg-black/70 text-white text-xs rounded-full pl-3 pr-1.5 py-1.5 shadow-lg border border-white/10">
               <span>
                 Đang đặt <b>{buildModeLabel}</b> — bấm vào bản đồ để đặt
@@ -426,16 +429,8 @@ export default function GameCanvas({
           )}
         </div>
 
-        {!hasSelection && !result && !buildModeLabel && (
-          <div
-            className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
-            style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
-          >
-            <div className="text-[11px] text-white/70 bg-black/40 rounded-full px-3 py-1.5">
-              Bấm vào Lâu đài trên bản đồ để bắt đầu xây dựng
-            </div>
-          </div>
-        )}
+        {/* Ghi chú: gợi ý "chưa chọn gì" trước đây cố định sát đáy màn hình đã bị bỏ —
+            giờ chỉ dùng đúng 1 tutorial mờ dần ở trên (24% từ đỉnh) để không che minimap/gameplay */}
       </div>
     </div>
   );

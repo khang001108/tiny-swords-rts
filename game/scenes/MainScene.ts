@@ -125,6 +125,8 @@ export default class MainScene extends Phaser.Scene {
   private isPanning = false;
   private pinchStartDist = 0;
   private pinchStartZoom = 1;
+  private minZoom = 1;
+  private maxZoom = 3;
   private dragBoxG!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
@@ -356,9 +358,26 @@ export default class MainScene extends Phaser.Scene {
     this.opponentConnected = this.mode !== "online" ? true : this.opponentConnected;
     this.matchStartMs = this.time.now;
     this.layoutBases();
-    this.cameras.main.setBounds(0, 0, this.preset.worldW, this.preset.worldH);
-    this.cameras.main.centerOn(this.myBasePos.x, this.myBasePos.y);
+    this.setupCamera();
     this.emitHud();
+  }
+
+  /**
+   * Camera mặc định phải luôn "phủ kín" world theo cả 2 chiều — nếu zoom quá thấp so với
+   * kích thước world, phần viewport vượt ra ngoài world sẽ lộ màu nền trống (đúng lỗi đã gặp:
+   * mảng xanh đậm lớn phía dưới màn hình). minZoom đảm bảo điều đó không bao giờ xảy ra;
+   * defaultZoom nhân thêm để castle/building đủ lớn, rõ ràng ngay khi vào trận.
+   */
+  private setupCamera() {
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, this.preset.worldW, this.preset.worldH);
+    const fitZoomH = PORTRAIT_H / this.preset.worldH;
+    const fitZoomW = PORTRAIT_W / this.preset.worldW;
+    this.minZoom = Math.max(fitZoomH, fitZoomW);
+    this.maxZoom = this.minZoom * 3.2;
+    const defaultZoom = Phaser.Math.Clamp(this.minZoom * 1.15, this.minZoom, this.maxZoom);
+    cam.setZoom(defaultZoom);
+    cam.centerOn(this.myBasePos.x, this.myBasePos.y);
   }
 
   private layoutBases() {
@@ -772,7 +791,7 @@ export default class MainScene extends Phaser.Scene {
         this.dragBoxG.clear();
       } else {
         const scale = dist / this.pinchStartDist;
-        const newZoom = Phaser.Math.Clamp(this.pinchStartZoom * scale, 0.55, 1.8);
+        const newZoom = Phaser.Math.Clamp(this.pinchStartZoom * scale, this.minZoom, this.maxZoom);
         this.cameras.main.setZoom(newZoom);
       }
     } else {
@@ -1342,11 +1361,11 @@ export default class MainScene extends Phaser.Scene {
   // Vị trí + kích thước minimap tính theo màn hình (không phải theo bản đồ) vì minimap cố định trên camera
   // Đặt góc dưới-trái theo đúng chuẩn bố cục RTS mobile (không đụng nút Settings ở trên-phải)
   private minimapRect() {
-    const mmW = 150;
-    const mmH = 100;
+    const mmW = 130;
+    const mmH = 90;
     const pad = 10;
     const mmX = pad;
-    const mmY = PORTRAIT_H - mmH - pad - 90; // chừa chỗ cho action panel phía dưới cùng
+    const mmY = PORTRAIT_H - mmH - pad - 34; // chừa chút chỗ cho gợi ý dưới đáy màn hình
     return { mmX, mmY, mmW, mmH };
   }
 
