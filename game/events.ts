@@ -51,12 +51,6 @@ export interface EndlessWaveUpdate {
   wave: number;
 }
 
-export interface BuildingAnchor {
-  x: number;
-  y: number;
-  flip: boolean;
-}
-
 export interface BuildModeStart {
   label: string;
 }

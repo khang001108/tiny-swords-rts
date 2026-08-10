@@ -10,7 +10,6 @@ import {
   BuildingSelection,
   BuildingRole,
   EndlessWaveUpdate,
-  BuildingAnchor,
   BuildModeStart,
   MinimapData,
 } from "@/game/events";
@@ -74,7 +73,6 @@ export default function GameCanvas({
   mapSize: MapSize;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudUpdate>({
     gold: 0,
     wood: 0,
@@ -150,14 +148,6 @@ export default function GameCanvas({
     };
     const onDeselect = () => setHasSelection(false);
     const onWave = (p: EndlessWaveUpdate) => setWave(p.wave);
-    const onAnchor = (p: BuildingAnchor) => {
-      const el = panelRef.current;
-      if (!el) return;
-      el.style.left = `${p.x}px`;
-      el.style.top = `${p.flip ? p.y + 44 : p.y - 44}px`;
-      el.style.transform = p.flip ? "translate(-50%, 0)" : "translate(-50%, -100%)";
-      el.style.opacity = "1";
-    };
     const onBuildStart = (p: BuildModeStart) => setBuildModeLabel(p.label);
     const onBuildEnd = () => setBuildModeLabel(null);
     const onMinimap = (p: MinimapData) => setMinimap(p);
@@ -168,7 +158,6 @@ export default function GameCanvas({
     gameEvents.on("select-building", onBuilding);
     gameEvents.on("deselect-building", onDeselect);
     gameEvents.on("endless-wave", onWave);
-    gameEvents.on("building-anchor", onAnchor);
     gameEvents.on("build-mode-start", onBuildStart);
     gameEvents.on("build-mode-end", onBuildEnd);
     gameEvents.on("minimap-data", onMinimap);
@@ -180,7 +169,6 @@ export default function GameCanvas({
       gameEvents.off("select-building", onBuilding);
       gameEvents.off("deselect-building", onDeselect);
       gameEvents.off("endless-wave", onWave);
-      gameEvents.off("building-anchor", onAnchor);
       gameEvents.off("build-mode-start", onBuildStart);
       gameEvents.off("build-mode-end", onBuildEnd);
       gameEvents.off("minimap-data", onMinimap);
@@ -346,20 +334,23 @@ export default function GameCanvas({
           </div>
         )}
 
-        {/* ══ CONTEXTUAL WORLD UI — build menu bám theo đúng vị trí công trình trên world, không cố định đáy màn hình ══ */}
+        {/* Khu vực cố định góc dưới-trái màn hình (screen-space thật — không dính world/camera):
+            bảng tuyển lính (nếu đang chọn công trình) xếp ngay TRÊN minimap, cách nhau ~10px. */}
         <div
-          ref={panelRef}
-          className="absolute z-20 pointer-events-none transition-opacity duration-150"
-          style={{ opacity: 0, left: "50%", top: "50%" }}
+          className="absolute left-0 bottom-0 z-20 flex flex-col items-start gap-2.5"
+          style={{
+            paddingLeft: "max(10px, env(safe-area-inset-left))",
+            paddingBottom: "max(10px, env(safe-area-inset-bottom))",
+          }}
         >
           {hasSelection && !result && !buildModeLabel && (
-            <div className="pointer-events-auto rounded-xl bg-[#1c150c]/92 border border-white/10 shadow-xl px-2 py-1.5 w-[280px]">
+            <div className="rounded-xl bg-[#1c150c]/92 border border-white/10 shadow-xl px-2.5 py-2 w-[210px]">
               <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
                 <img src={buildingThumb(buildingRole)} className="w-5 h-5 object-contain rounded" alt="" />
                 <span className="text-[11px] font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
               </div>
 
-              <div className="flex gap-1.5 flex-wrap items-start">
+              <div className="grid grid-cols-2 gap-1.5">
                 {(buildingRole === "castle" || buildingRole === "barracks") &&
                   (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
                     const cfg = UNIT_CONFIGS[type];
@@ -388,10 +379,10 @@ export default function GameCanvas({
                 )}
 
                 {buildingRole === "tower" && (
-                  <p className="text-[10px] text-white/60 py-1 w-full">Tự động bắn địch trong tầm — không sản xuất.</p>
+                  <p className="text-[10px] text-white/60 py-1 col-span-2">Tự động bắn địch trong tầm — không sản xuất.</p>
                 )}
                 {buildingRole === "monastery" && (
-                  <p className="text-[10px] text-white/60 py-1 w-full">Công trình trang trí.</p>
+                  <p className="text-[10px] text-white/60 py-1 col-span-2">Công trình trang trí.</p>
                 )}
                 {buildingRole.startsWith("resource-") &&
                   (() => {
@@ -399,7 +390,7 @@ export default function GameCanvas({
                     const built = hud.resourceHouses[kind];
                     if (built) {
                       return (
-                        <p className="text-[10px] text-emerald-400 py-1 w-full">
+                        <p className="text-[10px] text-emerald-400 py-1 col-span-2">
                           ✓ Đã có nhà — dân tự khai thác mỏ {RESOURCE_LABEL[kind]} mãi mãi.
                         </p>
                       );
@@ -431,22 +422,12 @@ export default function GameCanvas({
               )}
             </div>
           )}
-        </div>
 
-        {/* Minimap — HTML/SVG thật 100% screen-space, không dính camera.zoom của Phaser
-            (khác bản cũ vẽ bằng Phaser Graphics: dù setScrollFactor(0) vẫn bị camera.zoom
-            scale theo, gây lỗi minimap co giãn/lệch khi zoom). Kích thước CSS cố định luôn. */}
-        {minimap && (
-          <div
-            className="absolute left-0 bottom-0 z-20"
-            style={{
-              paddingLeft: "max(10px, env(safe-area-inset-left))",
-              paddingBottom: "max(10px, env(safe-area-inset-bottom))",
-            }}
-          >
-            <MinimapPanel data={minimap} />
-          </div>
-        )}
+          {/* Minimap — HTML/SVG thật 100% screen-space, không dính camera.zoom của Phaser
+              (khác bản cũ vẽ bằng Phaser Graphics: dù setScrollFactor(0) vẫn bị camera.zoom
+              scale theo, gây lỗi minimap co giãn/lệch khi zoom). Kích thước CSS cố định luôn. */}
+          {minimap && <MinimapPanel data={minimap} />}
+        </div>
 
         {/* Ghi chú: gợi ý "chưa chọn gì" trước đây cố định sát đáy màn hình đã bị bỏ —
             giờ chỉ dùng đúng 1 tutorial mờ dần ở trên (24% từ đỉnh) để không che minimap/gameplay */}
@@ -475,20 +456,20 @@ function BuildCard({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`relative w-[60px] h-[60px] rounded-lg border flex flex-col items-center justify-center gap-0.5 transition ${
+      className={`relative w-full h-[72px] rounded-lg border flex flex-col items-center justify-center gap-0.5 shadow-md transition ${
         disabled
-          ? "opacity-45 grayscale bg-white/5 border-white/10"
-          : "bg-white/10 border-white/25 active:scale-95 hover:bg-white/15"
+          ? "opacity-45 grayscale bg-[#e9dcbb]/70 border-black/20"
+          : "bg-[#e9dcbb]/95 border-black/30 active:scale-95 hover:bg-[#f0e5c8]"
       }`}
     >
       {img ? (
-        <img src={img} className="w-7 h-7 object-contain" alt="" />
+        <img src={img} className="w-8 h-8 object-contain" alt="" />
       ) : (
-        <img src={icon(fallbackIcon)} className="w-5 h-5 object-contain" alt="" />
+        <img src={icon(fallbackIcon)} className="w-6 h-6 object-contain" alt="" />
       )}
-      <span className="text-[8px] text-white/90 leading-none text-center px-0.5">{label}</span>
-      <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold text-amber-300 bg-black/50 rounded px-1 flex items-center">
-        <img src={icon("gold")} className="w-2.5 h-2.5 mr-0.5" alt="" />
+      <span className="text-[9px] font-semibold text-[#3a2c1a] leading-none text-center px-0.5">{label}</span>
+      <span className="text-[9px] font-bold text-amber-800 flex items-center gap-0.5">
+        <img src={icon("gold")} className="w-2.5 h-2.5" alt="" />
         {cost}
       </span>
     </button>

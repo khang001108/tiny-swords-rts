@@ -1203,15 +1203,6 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  private emitBuildingAnchor() {
-    if (!this.selectedBuildingPos) return;
-    const cam = this.cameras.main;
-    const sx = (this.selectedBuildingPos.x - cam.worldView.x) * cam.zoom;
-    const sy = (this.selectedBuildingPos.y - cam.worldView.y) * cam.zoom;
-    const flip = sy < 190;
-    gameEvents.emit("building-anchor", { x: sx, y: sy, flip });
-  }
-
   // ── Spawn ──────────────────────────────────────────────────────────
   private handleSpawnVillager() {
     if (this.gameOver || !this.myVillagers || !this.myVillagers.canAdd()) return;
@@ -1557,7 +1548,6 @@ export default class MainScene extends Phaser.Scene {
       this.emitMinimapData();
     }
     this.drawSelectionRing();
-    this.emitBuildingAnchor();
 
     if (time - this.lastBroadcastAt >= STATE_BROADCAST_MS) {
       this.lastBroadcastAt = time;
