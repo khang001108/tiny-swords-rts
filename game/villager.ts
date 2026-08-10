@@ -123,6 +123,13 @@ export class VillagerSystem {
     v.sprite.play(this.animKey(kind, "run"), true);
   }
 
+  /** Mỏ 1 loại nào đó vừa cạn — dồn hết dân đang gán vào loại đó sang loại còn hàng */
+  reassignAwayFrom(depletedKind: ResourceKind, fallbackKind: ResourceKind) {
+    for (const v of this.villagers) {
+      if (v.kind === depletedKind) this.reassignKind(v.id, fallbackKind);
+    }
+  }
+
   private texKey(kind: ResourceKind, phase: "run" | "interact" | "carry" | "idle") {
     if (phase === "idle") return `vill_${this.color}_idle`;
     return `vill_${this.color}_${phase}_${kind}`;

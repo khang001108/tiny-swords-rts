@@ -91,6 +91,7 @@ export interface MapPreset {
   bridgeYs: number[];
   bridgeHeight: number;
   hillSpecs: { x: number; y: number; scale: number }[];
+  forestClusters: { x: number; y: number; count: number; scale: number }[];
 }
 
 export const MAP_PRESETS: Record<MapSize, MapPreset> = {
@@ -108,9 +109,14 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     buildings: ["tower"],
     riverX: 450,
     riverWidth: 46,
-    bridgeYs: [330],
+    // Cầu lệch hẳn khỏi đường thẳng 2 base (midY=280) — buộc phải vòng lên trên thay vì đi thẳng
+    bridgeYs: [225],
     bridgeHeight: 74,
-    hillSpecs: [{ x: 290, y: 250, scale: 0.5 }],
+    hillSpecs: [
+      { x: 290, y: 260, scale: 0.5 },
+      { x: 610, y: 390, scale: 0.45 },
+    ],
+    forestClusters: [{ x: 300, y: 380, count: 4, scale: 0.4 }],
   },
   medium: {
     size: "medium",
@@ -126,11 +132,18 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     buildings: ["tower", "barracks"],
     riverX: 640,
     riverWidth: 58,
-    bridgeYs: [315, 465],
+    // 2 cầu lệch rõ khỏi midY=320 theo 2 hướng ngược nhau — có route "vòng trên" và "vòng dưới" thật sự
+    bridgeYs: [255, 520],
     bridgeHeight: 72,
     hillSpecs: [
       { x: 420, y: 260, scale: 0.6 },
       { x: 860, y: 500, scale: 0.6 },
+      { x: 740, y: 235, scale: 0.42 },
+    ],
+    forestClusters: [
+      { x: 520, y: 420, count: 5, scale: 0.45 },
+      { x: 300, y: 480, count: 4, scale: 0.4 },
+      { x: 980, y: 250, count: 4, scale: 0.4 },
     ],
   },
   large: {
@@ -147,12 +160,19 @@ export const MAP_PRESETS: Record<MapSize, MapPreset> = {
     buildings: ["tower", "barracks", "house1", "monastery"],
     riverX: 850,
     riverWidth: 66,
-    bridgeYs: [352, 470, 588],
+    // 3 cầu dàn trải rộng quanh midY=380 — nhiều route thật (gần/xa/vòng xa) thay vì gần như 1 đường thẳng
+    bridgeYs: [300, 470, 630],
     bridgeHeight: 70,
     hillSpecs: [
       { x: 560, y: 330, scale: 0.7 },
       { x: 1150, y: 610, scale: 0.7 },
-      { x: 850, y: 715, scale: 0.5 },
+      { x: 950, y: 715, scale: 0.5 },
+      { x: 750, y: 280, scale: 0.5 },
+    ],
+    forestClusters: [
+      { x: 720, y: 550, count: 6, scale: 0.5 },
+      { x: 420, y: 560, count: 4, scale: 0.4 },
+      { x: 1300, y: 320, count: 4, scale: 0.4 },
     ],
   },
 };
@@ -229,6 +249,12 @@ export const UNIT_PERACTION_FRAMES: Partial<Record<UnitType, { idle: number; wal
 
 // ── Dân (villager) — đi khai thác Gỗ / Vàng / Thịt ──────────────────────
 export type ResourceKind = "wood" | "gold" | "meat";
+
+// ── Cạn kiệt tài nguyên — Gỗ/Vàng có giới hạn thật, hết thì mỏ biến mất (Thịt/cừu giữ vô hạn) ──
+export const RESOURCE_NODE_MAX_HP: Partial<Record<ResourceKind, number>> = {
+  wood: 240,
+  gold: 288,
+};
 
 export const RESOURCE_LABEL: Record<ResourceKind, string> = {
   wood: "Gỗ",

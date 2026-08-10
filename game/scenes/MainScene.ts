@@ -21,6 +21,7 @@ import {
   HOUSE_POP_BONUS,
   HOUSE_VILLAGER_BONUS,
   RESOURCE_HOUSE_COST,
+  RESOURCE_NODE_MAX_HP,
   RESOURCE_HOUSE_POP_BONUS,
   MAP_PRESETS,
   MapPreset,
@@ -105,6 +106,12 @@ export default class MainScene extends Phaser.Scene {
   private buildMode: { type: "house" } | { type: "resource"; kind: ResourceKind } | null = null;
   private ghostSprite: Phaser.GameObjects.Image | null = null;
   private myBuildingPositions: { x: number; y: number }[] = [];
+  private woodNodeSprites: Phaser.GameObjects.Sprite[] = [];
+  private goldNodeSprite: Phaser.GameObjects.Image | null = null;
+  private woodNodePos: { x: number; y: number } | null = null;
+  private goldNodePos: { x: number; y: number } | null = null;
+  private resourceNodeHp: Partial<Record<ResourceKind, number>> = {};
+  private resourceDepleted: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
   private paused = false;
   private currentWave = 1;
   private matchStartMs = 0;
@@ -255,6 +262,10 @@ export default class MainScene extends Phaser.Scene {
 
     // Mỏ tài nguyên
     this.load.image("res_gold", "/assets/resources/gold_node.png");
+    this.load.image("res_gold_75", "/assets/resources/gold_75.png");
+    this.load.image("res_gold_40", "/assets/resources/gold_40.png");
+    this.load.image("res_gold_15", "/assets/resources/gold_15.png");
+    this.load.image("res_stump", "/assets/resources/stump.png");
     this.load.spritesheet("res_tree1", "/assets/resources/tree1_sheet.png", { frameWidth: 192, frameHeight: 256 });
     this.load.spritesheet("res_tree2", "/assets/resources/tree2_sheet.png", { frameWidth: 192, frameHeight: 256 });
     this.load.spritesheet("res_sheep", "/assets/resources/sheep_sheet.png", { frameWidth: 128, frameHeight: 128 });
@@ -511,6 +522,8 @@ export default class MainScene extends Phaser.Scene {
         img.setInteractive({ cursor: "pointer" });
         img.setData("kind", "resource");
         img.setData("resourceKind", "gold");
+        this.goldNodeSprite = img;
+        this.goldNodePos = { x: nx, y: ny };
       } else if (spec.kind === "wood") {
         const t1 = this.add.sprite(nx - 16, ny, "res_tree1", 0).setScale(0.4).setDepth(this.yDepth(ny));
         t1.play("res_tree1-sway");
@@ -520,6 +533,8 @@ export default class MainScene extends Phaser.Scene {
           s.setData("kind", "resource");
           s.setData("resourceKind", "wood");
         });
+        this.woodNodeSprites = [t1, t2];
+        this.woodNodePos = { x: nx, y: ny };
       } else {
         const s1 = this.add.sprite(nx - 12, ny, "res_sheep", 0).setScale(0.55).setDepth(this.yDepth(ny));
         s1.play("res_sheep-idle");
@@ -534,6 +549,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     this.myNodePosSaved = myNodePos;
+    this.resourceNodeHp = { wood: RESOURCE_NODE_MAX_HP.wood, gold: RESOURCE_NODE_MAX_HP.gold };
     this.myVillagers = new VillagerSystem(
       this,
       this.mySide === "left" ? "blue" : "red",
@@ -548,8 +564,58 @@ export default class MainScene extends Phaser.Scene {
     if (kind === "gold") this.gold += amount;
     else if (kind === "wood") this.wood += amount;
     else this.meat += amount;
+
+    if ((kind === "wood" || kind === "gold") && !this.resourceDepleted[kind]) {
+      const maxHp = RESOURCE_NODE_MAX_HP[kind] ?? 1;
+      const cur = Math.max(0, (this.resourceNodeHp[kind] ?? maxHp) - amount);
+      this.resourceNodeHp[kind] = cur;
+      this.updateResourceNodeVisual(kind, cur / maxHp);
+      if (cur <= 0) this.depleteResourceNode(kind);
+    }
+
     this.recomputePopCap();
     this.emitHud();
+  }
+
+  /** Đổi hình mỏ theo % còn lại — dùng đúng bộ sprite nhiều cỡ có sẵn trong gói thay vì giữ 1 hình cố định */
+  private updateResourceNodeVisual(kind: "wood" | "gold", pct: number) {
+    if (kind === "gold" && this.goldNodeSprite) {
+      if (pct > 0.7) this.goldNodeSprite.setTexture("res_gold");
+      else if (pct > 0.4) this.goldNodeSprite.setTexture("res_gold_75");
+      else if (pct > 0.15) this.goldNodeSprite.setTexture("res_gold_40");
+      else this.goldNodeSprite.setTexture("res_gold_15");
+    } else if (kind === "wood" && this.woodNodeSprites.length) {
+      // Cây thưa dần: khi còn < 50% thì bớt 1 cây, xuống thấp nữa mới đổi cây còn lại sang gốc cây
+      const [t1, t2] = this.woodNodeSprites;
+      if (pct <= 0.55 && t2.visible) t2.setVisible(false);
+      if (pct <= 0.2 && t1.texture.key !== "res_stump") {
+        t1.setTexture("res_stump").setScale(0.3).stop();
+      }
+    }
+  }
+
+  /** Mỏ cạn hẳn — biến mất, hiệu ứng bụi, và dân đang khai thác ở đây tự chuyển sang mỏ khác còn tài nguyên */
+  private depleteResourceNode(kind: "wood" | "gold") {
+    this.resourceDepleted[kind] = true;
+    const pos = kind === "wood" ? this.woodNodePos : this.goldNodePos;
+    if (pos) this.playDeathFx(pos.x, pos.y);
+    if (kind === "gold" && this.goldNodeSprite) {
+      this.goldNodeSprite.destroy();
+      this.goldNodeSprite = null;
+    } else if (kind === "wood") {
+      this.woodNodeSprites.forEach((s) => s.destroy());
+      this.woodNodeSprites = [];
+    }
+    this.myVillagers?.reassignAwayFrom(kind, this.pickAvailableResourceKind(kind));
+  }
+
+  /** Chọn 1 loại tài nguyên khác còn hàng để dồn dân bị "mất việc" sang — ưu tiên loại chưa cạn */
+  private pickAvailableResourceKind(exclude: ResourceKind): ResourceKind {
+    const order: ResourceKind[] = ["meat", "gold", "wood"].filter((k) => k !== exclude) as ResourceKind[];
+    for (const k of order) {
+      if (k === "meat" || !this.resourceDepleted[k as "wood" | "gold"]) return k;
+    }
+    return "meat";
   }
 
   private recomputePopCap() {
@@ -773,6 +839,31 @@ export default class MainScene extends Phaser.Scene {
       const rockKey = Phaser.Math.RND.pick(["deco_rock", "deco_bush"]);
       this.add.image(h.x - 24 * h.scale, h.y - 40 * h.scale, rockKey).setScale(0.45 * h.scale).setDepth(4);
       this.hillObstacles.push({ x: h.x, y: h.y, r: 52 * h.scale });
+    }
+    this.buildForestClusters();
+  }
+
+  /**
+   * Cụm rừng NẰM TRONG bản đồ (không chỉ ở viền như trước) — vừa trang trí vừa là vật cản thật
+   * (dùng chung mảng né tránh với đồi), tạo choke point khiến đường đi giữa 2 base không còn
+   * là 1 đường thẳng mà phải len qua cầu + vòng qua rừng/đồi.
+   */
+  private buildForestClusters() {
+    const treeKeys = ["tree_a", "tree_b", "tree_c"];
+    let seed = 0;
+    for (const c of this.preset.forestClusters) {
+      for (let i = 0; i < c.count; i++) {
+        seed++;
+        const angle = (i / c.count) * Math.PI * 2 + seed * 0.7;
+        const rad = 18 + (i % 3) * 14;
+        const tx = c.x + Math.cos(angle) * rad;
+        const ty = c.y + Math.sin(angle) * rad * 0.7;
+        const key = treeKeys[seed % treeKeys.length];
+        this.add.image(tx, ty, key).setScale(c.scale).setDepth(this.yDepth(ty)).setOrigin(0.5, 0.85);
+      }
+      // bán kính vật cản ước theo số cây trong cụm — cụm càng đông càng khó len qua giữa
+      const obstacleR = 26 + c.count * 7;
+      this.hillObstacles.push({ x: c.x, y: c.y, r: obstacleR * c.scale * 2.1 });
     }
   }
 

@@ -224,7 +224,10 @@ function MapPreviewSvg({ size }: { size: MapSize }) {
         <rect key={i} x={riverX - riverW / 2 - 2} y={by * sy - 5} width={riverW + 4} height={10} fill="#8a5a34" />
       ))}
       {p.hillSpecs.map((h, i) => (
-        <circle key={i} cx={h.x * sx} cy={h.y * sy} r={7 * h.scale} fill="#7fa9a3" opacity={0.8} />
+        <circle key={`h${i}`} cx={h.x * sx} cy={h.y * sy} r={7 * h.scale} fill="#7fa9a3" opacity={0.8} />
+      ))}
+      {p.forestClusters.map((f, i) => (
+        <circle key={`f${i}`} cx={f.x * sx} cy={f.y * sy} r={5 * f.scale + 2} fill="#1e4620" opacity={0.85} />
       ))}
       <rect x={leftX - 3} y={midY - 3} width={6} height={6} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.5} />
       <rect x={rightX - 3} y={midY - 3} width={6} height={6} fill="#ef4444" stroke="#1e293b" strokeWidth={0.5} />
