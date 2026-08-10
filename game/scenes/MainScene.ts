@@ -26,6 +26,7 @@ import {
   MapPreset,
   MapSize,
   computePopCap,
+  PORTRAIT_W,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
   STARTING_GOLD,
@@ -116,7 +117,9 @@ export default class MainScene extends Phaser.Scene {
   private buildingRing!: Phaser.GameObjects.Graphics;
   private selectedBuildingPos: { x: number; y: number } | null = null;
   private dragStart: { x: number; y: number } | null = null;
+  private dragStartScreen: { x: number; y: number } | null = null;
   private isDragging = false;
+  private isPanning = false;
   private dragBoxG!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
@@ -344,6 +347,8 @@ export default class MainScene extends Phaser.Scene {
     this.opponentConnected = this.mode !== "online" ? true : this.opponentConnected;
     this.matchStartMs = this.time.now;
     this.layoutBases();
+    this.cameras.main.setBounds(0, 0, this.preset.worldW, this.preset.worldH);
+    this.cameras.main.centerOn(this.myBasePos.x, this.myBasePos.y);
     this.emitHud();
   }
 
@@ -743,6 +748,13 @@ export default class MainScene extends Phaser.Scene {
   // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh (hỗ trợ kéo-chọn nhiều) ──
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
+
+    // Bấm vào minimap (luôn cố định trên màn hình) → camera nhảy tới đúng vị trí đó trên bản đồ lớn
+    if (this.pointInMinimap(pointer.x, pointer.y)) {
+      this.jumpCameraFromMinimap(pointer.x, pointer.y);
+      return;
+    }
+
     const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
     const hit = hits[0];
 
@@ -783,13 +795,31 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
-    // Không trúng gì cụ thể — có thể là bắt đầu kéo chọn vùng, hoặc lệnh di chuyển tới điểm trống
+    // Không trúng gì cụ thể:
+    // - Chạm tay (điện thoại) → kéo để cuộn camera xem chỗ khác của bản đồ
+    // - Chuột (máy tính) → kéo để chọn nhiều quân trong 1 vùng
     this.dragStart = { x: pointer.worldX, y: pointer.worldY };
+    this.dragStartScreen = { x: pointer.x, y: pointer.y };
     this.isDragging = false;
+    this.isPanning = false;
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer) {
     if (!this.dragStart || !pointer.isDown) return;
+    const isTouch = pointer.wasTouch;
+
+    if (isTouch) {
+      const dxScreen = pointer.x - (this.dragStartScreen?.x ?? pointer.x);
+      const dyScreen = pointer.y - (this.dragStartScreen?.y ?? pointer.y);
+      if (!this.isPanning && Math.hypot(dxScreen, dyScreen) > 6) this.isPanning = true;
+      if (this.isPanning) {
+        const cam = this.cameras.main;
+        cam.scrollX -= pointer.x - pointer.prevPosition.x;
+        cam.scrollY -= pointer.y - pointer.prevPosition.y;
+      }
+      return;
+    }
+
     const dx = pointer.worldX - this.dragStart.x;
     const dy = pointer.worldY - this.dragStart.y;
     if (!this.isDragging && Math.hypot(dx, dy) > 8) this.isDragging = true;
@@ -810,10 +840,13 @@ export default class MainScene extends Phaser.Scene {
     if (this.gameOver || this.paused) {
       this.dragStart = null;
       this.isDragging = false;
+      this.isPanning = false;
       this.dragBoxG.clear();
       return;
     }
-    if (this.isDragging && this.dragStart) {
+    if (this.isPanning) {
+      // vừa cuộn camera xong — không coi đây là 1 cú bấm chọn/ra lệnh
+    } else if (this.isDragging && this.dragStart) {
       const x1 = Math.min(this.dragStart.x, pointer.worldX);
       const x2 = Math.max(this.dragStart.x, pointer.worldX);
       const y1 = Math.min(this.dragStart.y, pointer.worldY);
@@ -840,7 +873,9 @@ export default class MainScene extends Phaser.Scene {
       this.issueMoveCommand(this.dragStart.x, this.dragStart.y);
     }
     this.dragStart = null;
+    this.dragStartScreen = null;
     this.isDragging = false;
+    this.isPanning = false;
     this.dragBoxG.clear();
   }
 
@@ -1197,17 +1232,37 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  // Vị trí + kích thước minimap tính theo màn hình (không phải theo bản đồ) vì minimap cố định trên camera
+  private minimapRect() {
+    const mmW = 150;
+    const mmH = 100;
+    const pad = 10;
+    const mmX = PORTRAIT_W - mmW - pad;
+    const mmY = pad;
+    return { mmX, mmY, mmW, mmH };
+  }
+
+  private pointInMinimap(screenX: number, screenY: number): boolean {
+    const { mmX, mmY, mmW, mmH } = this.minimapRect();
+    return screenX >= mmX && screenX <= mmX + mmW && screenY >= mmY && screenY <= mmY + mmH;
+  }
+
+  private jumpCameraFromMinimap(screenX: number, screenY: number) {
+    const { mmX, mmY, mmW, mmH } = this.minimapRect();
+    const sx = (mmW - 8) / this.preset.worldW;
+    const sy = (mmH - 8) / this.preset.worldH;
+    const worldX = (screenX - mmX - 4) / sx;
+    const worldY = (screenY - mmY - 4) / sy;
+    this.cameras.main.centerOn(worldX, worldY);
+  }
+
   private drawMinimap() {
     const g = this.minimapG;
     g.clear();
-    const mmW = 140;
-    const mmH = 90;
-    const pad = 10;
-    const mmX = this.preset.worldW - mmW - pad;
-    const mmY = pad;
-    g.fillStyle(0x1a2e1a, 0.75);
+    const { mmX, mmY, mmW, mmH } = this.minimapRect();
+    g.fillStyle(0x1a2e1a, 0.8);
     g.fillRoundedRect(mmX, mmY, mmW, mmH, 6);
-    g.lineStyle(1.5, 0xe9dcbb, 0.6);
+    g.lineStyle(1.5, 0xe9dcbb, 0.7);
     g.strokeRoundedRect(mmX, mmY, mmW, mmH, 6);
 
     const sx = (mmW - 8) / this.preset.worldW;
@@ -1224,6 +1279,16 @@ export default class MainScene extends Phaser.Scene {
     for (const u of this.localUnits.values()) g.fillCircle(toX(u.x), toY(u.y), 1.6);
     g.fillStyle(0xfca5a5, 1);
     for (const ru of this.remoteUnits.values()) g.fillCircle(toX(ru.sprite.x), toY(ru.sprite.y), 1.6);
+
+    // Khung chữ nhật thể hiện camera đang nhìn vùng nào trên bản đồ — bấm ra ngoài khung này để nhảy tới
+    const cam = this.cameras.main;
+    g.lineStyle(1.5, 0xffffff, 0.9);
+    g.strokeRect(
+      toX(cam.worldView.x),
+      toY(cam.worldView.y),
+      cam.worldView.width * sx,
+      cam.worldView.height * sy
+    );
   }
 
   private drawTowerShot(x1: number, y1: number, x2: number, y2: number) {

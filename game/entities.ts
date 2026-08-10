@@ -300,6 +300,10 @@ export const FFA_BASE_MAX_HP = 500;
 export const FFA_STARTING_GOLD = 70;
 export const FFA_GOLD_INCOME = 3;
 export const FFA_POP_CAP = 10;
+// ── Kích thước khung nhìn camera (dọc, giống điện thoại thật) — bản đồ vẫn to như cũ, camera chỉ hiện 1 phần ──
+export const PORTRAIT_W = 480;
+export const PORTRAIT_H = 854;
+
 export const FFA_BOT_POP_CAP = 8;
 
 // ── Slider chọn kích thước map (thay cho 3 nút cố định) ───────────────

@@ -15,29 +15,49 @@ import {
   UNIT_CONFIGS,
   UnitType,
   MapSize,
-  MAP_PRESETS,
   VILLAGER_COST,
   HOUSE_COST,
   RESOURCE_HOUSE_COST,
   RESOURCE_LABEL,
   ResourceKind,
   ENDLESS_RECORD_KEY,
+  PORTRAIT_W,
+  PORTRAIT_H,
 } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 const BUILDING_LABEL: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
-  castle: "🏰 Lâu đài",
-  barracks: "⚔️ Doanh trại",
-  tower: "🗼 Tháp canh",
-  house1: "🏠 Nhà dân",
-  monastery: "⛪ Tu viện",
+  castle: "Lâu đài",
+  barracks: "Doanh trại",
+  tower: "Tháp canh",
+  house1: "Nhà dân",
+  monastery: "Tu viện",
+};
+const BUILDING_THUMB: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
+  castle: "/assets/buildings/Castle_Blue.png",
+  barracks: "/assets/buildings/Barracks_Blue.png",
+  tower: "/assets/buildings/Tower_Blue.png",
+  house1: "/assets/buildings/House1_Blue.png",
+  monastery: "/assets/buildings/Monastery_Blue.png",
+};
+const RESOURCE_THUMB: Record<ResourceKind, string> = {
+  wood: "/assets/ui9/icon-wood.png",
+  gold: "/assets/resources/gold_node.png",
+  meat: "/assets/ui9/icon-meat.png",
 };
 function buildingLabel(role: BuildingRole): string {
   if (role.startsWith("resource-")) {
     const kind = role.replace("resource-", "") as ResourceKind;
-    return `🌾 Mỏ ${RESOURCE_LABEL[kind]}`;
+    return `Mỏ ${RESOURCE_LABEL[kind]}`;
   }
   return BUILDING_LABEL[role as Exclude<BuildingRole, `resource-${ResourceKind}`>];
+}
+function buildingThumb(role: BuildingRole): string {
+  if (role.startsWith("resource-")) {
+    const kind = role.replace("resource-", "") as ResourceKind;
+    return RESOURCE_THUMB[kind];
+  }
+  return BUILDING_THUMB[role as Exclude<BuildingRole, `resource-${ResourceKind}`>];
 }
 
 export default function GameCanvas({
@@ -135,11 +155,10 @@ export default function GameCanvas({
   const buildHouse = () => gameEvents.emit("build-house");
   const buildResourceHouse = (kind: ResourceKind) => gameEvents.emit("build-resource-house", kind);
   const togglePause = () => gameEvents.emit("toggle-pause");
-  const preset = MAP_PRESETS[mapSize];
   const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
 
   return (
-    <div className="w-full mx-auto" style={{ maxWidth: preset.worldW }}>
+    <div className="w-full mx-auto" style={{ maxWidth: 460 }}>
       <div className="rounded-lg bg-[#e9dcbb]/95 border border-black/20 shadow-md mb-2 px-3 py-1.5 flex items-center justify-between text-sm text-[#3a2c1a] flex-wrap gap-x-3 gap-y-1">
         {mode === "online" ? (
           <span>
@@ -212,8 +231,8 @@ export default function GameCanvas({
 
       <div
         ref={containerRef}
-        className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl"
-        style={{ aspectRatio: `${preset.worldW} / ${preset.worldH}`, maxHeight: "68vh" }}
+        className="relative w-full mx-auto rounded-lg overflow-hidden border border-white/10 shadow-xl touch-none"
+        style={{ aspectRatio: `${PORTRAIT_W} / ${PORTRAIT_H}`, maxHeight: "78vh" }}
       >
         {paused && !result && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
@@ -261,8 +280,10 @@ export default function GameCanvas({
       </div>
 
       <div className="flex items-center gap-2 mt-3 px-1">
-        <span className="text-xs text-white/60 flex items-center gap-1">
-          Đang chọn: <span className="font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
+        <span className="text-xs text-white/60 flex items-center gap-2">
+          Đang chọn:
+          <img src={buildingThumb(buildingRole)} className="w-6 h-6 object-contain rounded" alt="" />
+          <span className="font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
         </span>
       </div>
 

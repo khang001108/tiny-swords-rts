@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import MainScene from "@/game/scenes/MainScene";
-import { MAP_PRESETS, MapSize } from "@/game/entities";
+import { MapSize, PORTRAIT_W, PORTRAIT_H } from "@/game/entities";
+
+// Khung nhìn camera cố định theo tỉ lệ dọc — thế giới (bản đồ) vẫn to như cũ,
+// camera chỉ hiện 1 phần và kéo/vuốt để xem chỗ khác (giống game RTS mobile thật).
 
 export function createPhaserGame(
   parent: HTMLDivElement,
@@ -9,12 +12,11 @@ export function createPhaserGame(
   mode: "bot" | "online" | "endless",
   mapSize: MapSize
 ): Phaser.Game {
-  const preset = MAP_PRESETS[mapSize] ?? MAP_PRESETS.medium;
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    width: preset.worldW,
-    height: preset.worldH,
+    width: PORTRAIT_W,
+    height: PORTRAIT_H,
     backgroundColor: "#3a5f3a",
     scale: {
       mode: Phaser.Scale.FIT,
@@ -25,3 +27,4 @@ export function createPhaserGame(
   game.scene.start("MainScene", { roomCode, isHost, mode, mapSize });
   return game;
 }
+
