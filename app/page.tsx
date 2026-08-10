@@ -34,14 +34,26 @@ export default function LobbyPage() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-6">
-      <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-20 h-20 object-contain mb-1 drop-shadow-lg" />
-      <h1 className="text-4xl font-extrabold mb-1 text-center tracking-wide" style={{ textShadow: "2px 2px 0 rgba(0,0,0,0.4)" }}>
-        Tiny Swords RTS
-      </h1>
-      <p className="text-white/60 mb-6 text-center text-sm">
-        Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time
-      </p>
+    <main
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-6 relative"
+      style={{
+        backgroundImage: "url(/assets/ui9/lobby_bg.jpg)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/70" />
+      <div className="relative z-10 w-full flex flex-col items-center">
+        <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-20 h-20 object-contain mb-1 drop-shadow-lg" />
+        <h1
+          className="text-4xl font-extrabold mb-1 text-center tracking-wide text-white"
+          style={{ textShadow: "0 2px 0 rgba(0,0,0,0.6), 0 0 18px rgba(0,0,0,0.5)" }}
+        >
+          Tiny Swords RTS
+        </h1>
+        <p className="text-white/80 mb-6 text-center text-sm drop-shadow">
+          Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time
+        </p>
 
       <NineSlice prefix="paper" className="w-full max-w-sm" style={{ minHeight: 0 }}>
         <div className="w-full px-6 py-7 text-[#3a2c1a]">
@@ -103,11 +115,12 @@ export default function LobbyPage() {
       </NineSlice>
 
       {step === "mode" && (
-        <p className="text-white/30 text-xs mt-6 max-w-md text-center">
+        <p className="text-white/50 text-xs mt-6 max-w-md text-center drop-shadow">
           Chơi với Bot để luyện tập một mình, hoặc tạo phòng rồi gửi mã cho bạn bè để đấu real-time. Endless Mode để thử
           sức sống sót qua càng nhiều sóng địch càng tốt.
         </p>
       )}
+      </div>
     </main>
   );
 }

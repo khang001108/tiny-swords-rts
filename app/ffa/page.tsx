@@ -26,9 +26,16 @@ export default function FfaPage() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4">
-      <h1 className="text-3xl font-extrabold mb-1 text-center">⚔️ Đấu 1 chọi nhiều</h1>
-      <p className="text-white/60 mb-6 text-center text-sm">Chọn phe của bạn rồi chọn số AI muốn đối đầu (tối đa 4)</p>
+    <main
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-6 relative"
+      style={{ backgroundImage: "url(/assets/ui9/lobby_bg.jpg)", backgroundSize: "cover", backgroundPosition: "center" }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/70" />
+      <div className="relative z-10 w-full flex flex-col items-center">
+      <h1 className="text-3xl font-extrabold mb-1 text-center text-white" style={{ textShadow: "0 2px 0 rgba(0,0,0,0.6), 0 0 18px rgba(0,0,0,0.5)" }}>
+        ⚔️ Đấu 1 chọi nhiều
+      </h1>
+      <p className="text-white/80 mb-6 text-center text-sm drop-shadow">Chọn phe của bạn rồi chọn số AI muốn đối đầu (tối đa 4)</p>
 
       <NineSlice prefix="paper" className="w-full max-w-md">
         <div className="w-full px-6 py-7 text-[#3a2c1a]">
@@ -97,9 +104,10 @@ export default function FfaPage() {
         </div>
       </NineSlice>
 
-      <a href="/" className="text-white/40 text-sm mt-6 hover:text-white/70">
+      <a href="/" className="text-white/60 text-sm mt-6 hover:text-white/90 drop-shadow">
         ← Về sảnh chờ
       </a>
+      </div>
     </main>
   );
 }
