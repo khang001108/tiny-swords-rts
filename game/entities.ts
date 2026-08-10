@@ -70,112 +70,13 @@ export const BASE_MAX_HP = 600;
 // Kích thước 1 frame trong spritesheet Tiny Swords (đơn vị: px)
 export const FRAME_SIZE = 192;
 
-// ── Bản đồ ────────────────────────────────────────────────────────────
-export type MapSize = "small" | "medium" | "large";
-export type BuildingKey = "tower" | "barracks" | "house1" | "monastery";
-
-export interface MapPreset {
-  size: MapSize;
-  label: string;
-  desc: string;
-  worldW: number;
-  worldH: number;
-  baseMargin: number;
-  laneYMin: number;
-  laneYMax: number;
-  grassTexture: string;
-  treeSpacing: number;
-  buildings: BuildingKey[];
-  riverX: number;
-  riverWidth: number;
-  bridgeYs: number[];
-  bridgeHeight: number;
-  hillSpecs: { x: number; y: number; scale: number }[];
-  forestClusters: { x: number; y: number; count: number; scale: number }[];
-}
-
-export const MAP_PRESETS: Record<MapSize, MapPreset> = {
-  small: {
-    size: "small",
-    label: "Nhỏ",
-    desc: "Đấu nhanh, căn cứ gần nhau",
-    worldW: 900,
-    worldH: 560,
-    baseMargin: 90,
-    laneYMin: 190,
-    laneYMax: 470,
-    grassTexture: "grass_tile_small",
-    treeSpacing: 66,
-    buildings: ["tower"],
-    riverX: 450,
-    riverWidth: 46,
-    // Cầu lệch hẳn khỏi đường thẳng 2 base (midY=280) — buộc phải vòng lên trên thay vì đi thẳng
-    bridgeYs: [225],
-    bridgeHeight: 74,
-    hillSpecs: [
-      { x: 290, y: 260, scale: 0.5 },
-      { x: 610, y: 390, scale: 0.45 },
-    ],
-    forestClusters: [{ x: 300, y: 380, count: 4, scale: 0.4 }],
-  },
-  medium: {
-    size: "medium",
-    label: "Vừa",
-    desc: "Cân bằng, nhiều không gian điều quân",
-    worldW: 1280,
-    worldH: 640,
-    baseMargin: 110,
-    laneYMin: 220,
-    laneYMax: 560,
-    grassTexture: "grass_tile",
-    treeSpacing: 78,
-    buildings: ["tower", "barracks"],
-    riverX: 640,
-    riverWidth: 58,
-    // 2 cầu lệch rõ khỏi midY=320 theo 2 hướng ngược nhau — có route "vòng trên" và "vòng dưới" thật sự
-    bridgeYs: [255, 520],
-    bridgeHeight: 72,
-    hillSpecs: [
-      { x: 420, y: 260, scale: 0.6 },
-      { x: 860, y: 500, scale: 0.6 },
-      { x: 740, y: 235, scale: 0.42 },
-    ],
-    forestClusters: [
-      { x: 520, y: 420, count: 5, scale: 0.45 },
-      { x: 300, y: 480, count: 4, scale: 0.4 },
-      { x: 980, y: 250, count: 4, scale: 0.4 },
-    ],
-  },
-  large: {
-    size: "large",
-    label: "Lớn",
-    desc: "Trường kỳ, căn cứ đầy đủ công trình",
-    worldW: 1700,
-    worldH: 760,
-    baseMargin: 140,
-    laneYMin: 260,
-    laneYMax: 680,
-    grassTexture: "grass_tile_large",
-    treeSpacing: 88,
-    buildings: ["tower", "barracks", "house1", "monastery"],
-    riverX: 850,
-    riverWidth: 66,
-    // 3 cầu dàn trải rộng quanh midY=380 — nhiều route thật (gần/xa/vòng xa) thay vì gần như 1 đường thẳng
-    bridgeYs: [300, 470, 630],
-    bridgeHeight: 70,
-    hillSpecs: [
-      { x: 560, y: 330, scale: 0.7 },
-      { x: 1150, y: 610, scale: 0.7 },
-      { x: 950, y: 715, scale: 0.5 },
-      { x: 750, y: 280, scale: 0.5 },
-    ],
-    forestClusters: [
-      { x: 720, y: 550, count: 6, scale: 0.5 },
-      { x: 420, y: 560, count: 4, scale: 0.4 },
-      { x: 1300, y: 320, count: 4, scale: 0.4 },
-    ],
-  },
-};
+// ── Bản đồ — dữ liệu map đã tách ra thư mục game/maps/ (xem game/maps/index.ts) ─────────
+// Re-export ở đây để mọi chỗ đang `import { MapPreset, MAP_PRESETS } from "@/game/entities"`
+// không phải sửa gì — nhưng dữ liệu THẬT giờ nằm ở game/maps/, không phải trong file này nữa.
+import type { MapPreset, MapSize, BuildingKey } from "@/game/maps";
+import { MAP_PRESETS } from "@/game/maps";
+export type { MapPreset, MapSize, BuildingKey };
+export { MAP_PRESETS };
 
 export const BASE_POP_CAP = 6;
 export const POP_CAP_PER_BUILDING = 2;
@@ -290,8 +191,11 @@ export interface ResourceNodeSpec {
 
 export const RESOURCE_NODE_LAYOUT: ResourceNodeSpec[] = [
   { kind: "wood", offsetX: -130, offsetY: -25 },
-  { kind: "gold", offsetX: 95, offsetY: 100 },
-  { kind: "meat", offsetX: -110, offsetY: 115 },
+  // Vàng đẩy ra gần biên giới/cầu hơn hẳn — mỏ giá trị nhất (18/lượt) nhưng lộ nhất, dễ bị
+  // đối phương đột kích trước khi tới được lãnh thổ mình. Đây là "tài nguyên tranh chấp".
+  { kind: "gold", offsetX: -195, offsetY: 95 },
+  // Thịt lùi về gần base hơn — tài nguyên an toàn, ít giá trị hơn để bù lại.
+  { kind: "meat", offsetX: 50, offsetY: 115 },
 ];
 
 /** Mỗi 50 Gỗ+Thịt tích lũy được +1 giới hạn quân số, tối đa cộng thêm chừng này */

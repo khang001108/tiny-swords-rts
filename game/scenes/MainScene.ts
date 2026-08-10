@@ -112,6 +112,9 @@ export default class MainScene extends Phaser.Scene {
   private goldNodePos: { x: number; y: number } | null = null;
   private resourceNodeHp: Partial<Record<ResourceKind, number>> = {};
   private resourceDepleted: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
+  private neutralGoldSprite: Phaser.GameObjects.Image | null = null;
+  private neutralGoldHp = 0;
+  private neutralGoldDepleted = false;
   private paused = false;
   private currentWave = 1;
   private matchStartMs = 0;
@@ -142,6 +145,7 @@ export default class MainScene extends Phaser.Scene {
   private riverBand: { xMin: number; xMax: number } | null = null;
   private bridges: { y: number }[] = [];
   private hillObstacles: { x: number; y: number; r: number }[] = [];
+  private hillPlateaus: { x: number; y: number; r: number }[] = [];
   private navGrid: NavGrid | null = null;
 
   private localUnits = new Map<string, LocalUnit>();
@@ -353,6 +357,7 @@ export default class MainScene extends Phaser.Scene {
       this.mySide = "left";
       this.layoutBases();
       this.buildNavigation();
+      this.myVillagers?.setNavGrid(this.navGrid);
     }
 
     this.sync =
@@ -391,6 +396,7 @@ export default class MainScene extends Phaser.Scene {
     if (!isBotLike) {
       this.layoutBases();
       this.buildNavigation();
+      this.myVillagers?.setNavGrid(this.navGrid);
     }
     this.setupCamera();
     this.emitHud();
@@ -555,17 +561,36 @@ export default class MainScene extends Phaser.Scene {
       this.mySide === "left" ? "blue" : "red",
       { x: myX, y: midY },
       myNodePos,
-      (kind, amount) => this.handleVillagerDeposit(kind, amount)
+      (kind, amount, useNeutral) => this.handleVillagerDeposit(kind, amount, useNeutral),
+      null,
+      this.preset.neutralResource
     );
     (["wood", "gold", "meat"] as const).forEach((k) => this.myVillagers!.addVillager(k));
   }
 
-  private handleVillagerDeposit(kind: ResourceKind, amount: number) {
+  private handleVillagerDeposit(kind: ResourceKind, amount: number, useNeutral = false) {
     if (kind === "gold") this.gold += amount;
     else if (kind === "wood") this.wood += amount;
     else this.meat += amount;
 
-    if ((kind === "wood" || kind === "gold") && !this.resourceDepleted[kind]) {
+    if (useNeutral && kind === "gold" && !this.neutralGoldDepleted) {
+      this.neutralGoldHp = Math.max(0, this.neutralGoldHp - amount);
+      if (this.neutralGoldSprite) {
+        const pct = this.neutralGoldHp / (RESOURCE_NODE_MAX_HP.gold ?? 288);
+        if (pct <= 0.15) this.neutralGoldSprite.setTexture("res_gold_15");
+        else if (pct <= 0.4) this.neutralGoldSprite.setTexture("res_gold_40");
+        else if (pct <= 0.7) this.neutralGoldSprite.setTexture("res_gold_75");
+      }
+      if (this.neutralGoldHp <= 0) {
+        this.neutralGoldDepleted = true;
+        if (this.neutralGoldSprite) {
+          this.playDeathFx(this.neutralGoldSprite.x, this.neutralGoldSprite.y);
+          this.neutralGoldSprite.destroy();
+          this.neutralGoldSprite = null;
+        }
+        this.myVillagers?.reassignAwayFrom("gold", this.pickAvailableResourceKind("gold"), true);
+      }
+    } else if (!useNeutral && (kind === "wood" || kind === "gold") && !this.resourceDepleted[kind]) {
       const maxHp = RESOURCE_NODE_MAX_HP[kind] ?? 1;
       const cur = Math.max(0, (this.resourceNodeHp[kind] ?? maxHp) - amount);
       this.resourceNodeHp[kind] = cur;
@@ -830,6 +855,7 @@ export default class MainScene extends Phaser.Scene {
 
   private buildHills() {
     this.hillObstacles = [];
+    this.hillPlateaus = [];
     for (const h of this.preset.hillSpecs) {
       const shadow = this.add.graphics().setDepth(2);
       shadow.fillStyle(0x000000, 0.22);
@@ -838,9 +864,34 @@ export default class MainScene extends Phaser.Scene {
       this.add.image(h.x, h.y, "islet_cliff").setScale(h.scale * 0.75).setDepth(3);
       const rockKey = Phaser.Math.RND.pick(["deco_rock", "deco_bush"]);
       this.add.image(h.x - 24 * h.scale, h.y - 40 * h.scale, rockKey).setScale(0.45 * h.scale).setDepth(4);
-      this.hillObstacles.push({ x: h.x, y: h.y, r: 52 * h.scale });
+      // Vật cản pathfinding chỉ còn đúng phần lõi đá (rìa vách) — mặt đồi (plateau) rộng hơn thì
+      // đi qua được VÀ xây được, thay vì coi cả quả đồi là 1 khối bít kín như trước.
+      this.hillObstacles.push({ x: h.x, y: h.y, r: 20 * h.scale });
+      this.hillPlateaus.push({ x: h.x, y: h.y, r: 55 * h.scale });
     }
     this.buildForestClusters();
+    this.buildNeutralResource();
+  }
+
+  /** Mỏ vàng trung lập giữa 2 lãnh thổ — cả 2 bên đều cử dân qua được, nhưng phải băng đúng cây cầu */
+  private buildNeutralResource() {
+    const n = this.preset.neutralResource;
+    if (!n) return;
+    const shadow = this.add.graphics().setDepth(2);
+    shadow.fillStyle(0x000000, 0.2);
+    shadow.fillEllipse(n.x, n.y + 18, 60, 16);
+    const img = this.add.image(n.x, n.y, "res_gold").setScale(0.85).setDepth(this.yDepth(n.y));
+    img.setInteractive({ cursor: "pointer" });
+    img.setData("kind", "resource");
+    img.setData("resourceKind", "gold");
+    img.setData("neutral", true);
+    // Viền vàng nhẹ nhấp nháy — báo hiệu đây là điểm tranh chấp, không phải mỏ riêng của ai
+    const ring = this.add.graphics().setDepth(this.yDepth(n.y) - 0.001);
+    ring.lineStyle(2, 0xfacc15, 0.7);
+    ring.strokeCircle(n.x, n.y, 34);
+    this.tweens.add({ targets: ring, alpha: 0.25, duration: 900, yoyo: true, repeat: -1 });
+    this.neutralGoldSprite = img;
+    this.neutralGoldHp = RESOURCE_NODE_MAX_HP.gold ?? 288;
   }
 
   /**
@@ -1046,12 +1097,15 @@ export default class MainScene extends Phaser.Scene {
         return;
       }
       if (kind === "resource" && this.selected.some((s) => s.kind === "villager")) {
+        const isNeutral = hit.getData("neutral") === true;
         for (const s of this.selected) {
-          if (s.kind === "villager") this.myVillagers?.reassignKind(s.id, hit.getData("resourceKind"));
+          if (s.kind !== "villager") continue;
+          if (isNeutral) this.myVillagers?.reassignToNeutral(s.id);
+          else this.myVillagers?.reassignKind(s.id, hit.getData("resourceKind"));
         }
         return;
       }
-      if (kind === "resource" && this.selected.length === 0) {
+      if (kind === "resource" && this.selected.length === 0 && !hit.getData("neutral")) {
         const obj = hit as unknown as { x: number; y: number };
         this.selectedBuildingPos = { x: obj.x, y: obj.y };
         gameEvents.emit("select-building", { role: `resource-${hit.getData("resourceKind")}` });
@@ -1188,11 +1242,21 @@ export default class MainScene extends Phaser.Scene {
     }
     if (this.buildMode.type === "house") {
       const distBase = Phaser.Math.Distance.Between(x, y, this.myBasePos.x, this.myBasePos.y);
-      return distBase <= 280;
+      if (distBase <= 280) return true;
+      // Không đủ gần base thì vẫn cho xây nếu đang đứng trên mặt phẳng (plateau) của 1 quả đồi —
+      // đồi giờ là địa hình cao xây được, không còn là khối bít kín như trước.
+      return this.isOnBuildablePlateau(x, y);
     }
     const node = this.myNodePosSaved?.[this.buildMode.kind];
     if (!node) return false;
     return Phaser.Math.Distance.Between(x, y, node.x, node.y) <= 95;
+  }
+
+  private isOnBuildablePlateau(x: number, y: number): boolean {
+    for (const p of this.hillPlateaus) {
+      if (Phaser.Math.Distance.Between(x, y, p.x, p.y) <= p.r) return true;
+    }
+    return false;
   }
 
   private confirmBuildPlacement(x: number, y: number) {

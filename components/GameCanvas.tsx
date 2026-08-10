@@ -281,7 +281,8 @@ export default function GameCanvas({
             style={{ top: "24%" }}
           >
             <div className="pointer-events-auto max-w-[88%] bg-black/60 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
-              💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh.
+              💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh. Có
+              mỏ vàng viền sáng giữa bản đồ ai cũng khai thác được — bấm dân rồi bấm vào đó để cử qua tranh mỏ!
             </div>
           </div>
         )}

@@ -7,12 +7,14 @@ import {
   VILLAGER_MAX_COUNT,
   VILLAGER_SPEED,
 } from "@/game/entities";
+import { NavGrid, findPath } from "@/game/pathfinding";
 
 type Phase = "toNode" | "gathering" | "toBase" | "manual";
 
 interface Villager {
   id: string;
   kind: ResourceKind;
+  useNeutral: boolean; // đang khai thác mỏ trung lập giữa bản đồ thay vì mỏ riêng gần base
   sprite: Phaser.GameObjects.Sprite;
   phase: Phase;
   gatherUntil: number;
@@ -20,6 +22,9 @@ interface Villager {
   y: number;
   manualTarget: { x: number; y: number } | null;
   resumePhase: "toNode" | "toBase"; // quay lại pha nào sau khi đi lệnh thủ công xong
+  path: { x: number; y: number }[] | null;
+  pathIndex: number;
+  pathTargetKey: string;
 }
 
 export type NodePositions = Record<ResourceKind, { x: number; y: number }>;
@@ -35,7 +40,9 @@ export class VillagerSystem {
     color: "blue" | "red",
     private basePos: { x: number; y: number },
     private nodePos: NodePositions,
-    private onDeposit: (kind: ResourceKind, amount: number) => void
+    private onDeposit: (kind: ResourceKind, amount: number, useNeutral: boolean) => void,
+    private navGrid: NavGrid | null = null,
+    private neutralPos: { x: number; y: number } | null = null
   ) {
     this.color = color;
   }
@@ -50,6 +57,11 @@ export class VillagerSystem {
 
   increaseMax(n: number) {
     this.maxCount += n;
+  }
+
+  /** navGrid được dựng SAU layoutBases (cần biết hết vị trí building) nên gán muộn qua đây */
+  setNavGrid(grid: import("@/game/pathfinding").NavGrid | null) {
+    this.navGrid = grid;
   }
 
   canAdd() {
@@ -80,6 +92,7 @@ export class VillagerSystem {
     const v: Villager = {
       id,
       kind: assign,
+      useNeutral: false,
       sprite,
       phase: "toNode",
       gatherUntil: 0,
@@ -87,6 +100,9 @@ export class VillagerSystem {
       y: spawnPos.y,
       manualTarget: null,
       resumePhase: "toNode",
+      path: null,
+      pathIndex: 0,
+      pathTargetKey: "",
     };
     this.villagers.push(v);
   }
@@ -110,23 +126,39 @@ export class VillagerSystem {
     }
     v.phase = "manual";
     v.manualTarget = { x, y };
+    v.path = null;
     v.sprite.play(this.animKey(v.kind, "run"), true);
   }
 
-  /** Đổi loại tài nguyên dân này khai thác (bấm dân rồi bấm vào 1 mỏ khác) */
+  /** Đổi loại tài nguyên dân này khai thác (bấm dân rồi bấm vào 1 mỏ khác gần base) */
   reassignKind(id: string, kind: ResourceKind) {
     const v = this.villagers.find((vv) => vv.id === id);
     if (!v) return;
     v.kind = kind;
+    v.useNeutral = false;
     v.phase = "toNode";
+    v.path = null;
     v.manualTarget = null;
     v.sprite.play(this.animKey(kind, "run"), true);
   }
 
+  /** Chuyển dân này sang khai thác mỏ vàng TRUNG LẬP giữa bản đồ — phải băng sông nên dùng A* thật */
+  reassignToNeutral(id: string) {
+    if (!this.neutralPos) return;
+    const v = this.villagers.find((vv) => vv.id === id);
+    if (!v) return;
+    v.kind = "gold";
+    v.useNeutral = true;
+    v.phase = "toNode";
+    v.path = null;
+    v.manualTarget = null;
+    v.sprite.play(this.animKey("gold", "run"), true);
+  }
+
   /** Mỏ 1 loại nào đó vừa cạn — dồn hết dân đang gán vào loại đó sang loại còn hàng */
-  reassignAwayFrom(depletedKind: ResourceKind, fallbackKind: ResourceKind) {
+  reassignAwayFrom(depletedKind: ResourceKind, fallbackKind: ResourceKind, onlyNeutral = false) {
     for (const v of this.villagers) {
-      if (v.kind === depletedKind) this.reassignKind(v.id, fallbackKind);
+      if (v.kind === depletedKind && v.useNeutral === onlyNeutral) this.reassignKind(v.id, fallbackKind);
     }
   }
 
@@ -155,7 +187,8 @@ export class VillagerSystem {
         continue;
       }
 
-      const target = v.phase === "toNode" || v.phase === "gathering" ? this.nodePos[v.kind] : this.basePos;
+      const nodeTarget = v.useNeutral && this.neutralPos ? this.neutralPos : this.nodePos[v.kind];
+      const target = v.phase === "toNode" || v.phase === "gathering" ? nodeTarget : this.basePos;
 
       if (v.phase === "toNode") {
         this.moveToward(v, target, dt);
@@ -167,13 +200,15 @@ export class VillagerSystem {
       } else if (v.phase === "gathering") {
         if (now >= v.gatherUntil) {
           v.phase = "toBase";
+          v.path = null;
           v.sprite.play(this.animKey(v.kind, "carry"));
         }
       } else if (v.phase === "toBase") {
         this.moveToward(v, target, dt);
         if (this.dist(v, target) <= VILLAGER_ARRIVE_DIST) {
-          this.onDeposit(v.kind, VILLAGER_CARRY_AMOUNT[v.kind]);
+          this.onDeposit(v.kind, VILLAGER_CARRY_AMOUNT[v.kind], v.useNeutral);
           v.phase = "toNode";
+          v.path = null;
           v.sprite.play(this.animKey(v.kind, "run"));
         }
       }
@@ -186,16 +221,43 @@ export class VillagerSystem {
     return Phaser.Math.Distance.Between(v.x, v.y, target.x, target.y);
   }
 
-  /** Trả về true nếu đã tới đích */
+  /**
+   * Di chuyển 1 bước hướng tới target. Nếu có navGrid (bắt buộc khi đi mỏ trung lập phải băng
+   * sông) thì đi theo đường A* thật né sông/đồi/rừng — không thì đi thẳng như trước (đủ dùng cho
+   * quãng ngắn quanh base, tránh tính toán thừa không cần thiết). Trả về true nếu đã tới đích.
+   */
   private moveToward(v: Villager, target: { x: number; y: number }, dt: number): boolean {
-    const dx = target.x - v.x;
-    const dy = target.y - v.y;
+    let wp = target;
+    if (this.navGrid) {
+      const targetKey = `${Math.round(target.x / 10)},${Math.round(target.y / 10)}`;
+      if (!v.path || v.pathTargetKey !== targetKey) {
+        v.path = findPath(this.navGrid, v.x, v.y, target.x, target.y);
+        v.pathIndex = 0;
+        v.pathTargetKey = targetKey;
+      }
+      if (v.path && v.path.length) {
+        if (v.pathIndex >= v.path.length) v.pathIndex = v.path.length - 1;
+        wp = v.path[v.pathIndex];
+      }
+    }
+    const dx = wp.x - v.x;
+    const dy = wp.y - v.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
     const step = VILLAGER_SPEED * dt;
-    v.x += (dx / d) * Math.min(step, d);
-    v.y += (dy / d) * Math.min(step, d);
     v.sprite.setFlipX(dx < 0);
-    return d <= VILLAGER_ARRIVE_DIST;
+    if (d <= Math.max(step, 6)) {
+      v.x = wp.x;
+      v.y = wp.y;
+      if (this.navGrid && v.path && v.pathIndex < v.path.length - 1) {
+        v.pathIndex++;
+        return false; // còn waypoint tiếp theo trong đường A*, chưa phải đích cuối
+      }
+      const arrivedFinal = this.dist(v, target) <= VILLAGER_ARRIVE_DIST;
+      return arrivedFinal;
+    }
+    v.x += (dx / d) * step;
+    v.y += (dy / d) * step;
+    return false;
   }
 
   destroy() {

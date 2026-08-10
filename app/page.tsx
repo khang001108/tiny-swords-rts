@@ -229,6 +229,16 @@ function MapPreviewSvg({ size }: { size: MapSize }) {
       {p.forestClusters.map((f, i) => (
         <circle key={`f${i}`} cx={f.x * sx} cy={f.y * sy} r={5 * f.scale + 2} fill="#1e4620" opacity={0.85} />
       ))}
+      {p.neutralResource && (
+        <circle
+          cx={p.neutralResource.x * sx}
+          cy={p.neutralResource.y * sy}
+          r={3.2}
+          fill="#facc15"
+          stroke="#7a5c00"
+          strokeWidth={0.6}
+        />
+      )}
       <rect x={leftX - 3} y={midY - 3} width={6} height={6} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.5} />
       <rect x={rightX - 3} y={midY - 3} width={6} height={6} fill="#ef4444" stroke="#1e293b" strokeWidth={0.5} />
       {resDot(leftX, 1, "#a3752c", "wood")}
