@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { ResourceKind } from "@/game/entities";
 
 /** Bus dùng chung để UI (React) và Scene (Phaser) giao tiếp không cần prop-drilling. */
 export const gameEvents = new Phaser.Events.EventEmitter();
@@ -18,13 +19,14 @@ export interface HudUpdate {
   villagerMax: number;
   houses: number;
   housesMax: number;
+  resourceHouses: Record<ResourceKind, boolean>;
 }
 
 export interface PauseState {
   paused: boolean;
 }
 
-export type BuildingRole = "castle" | "barracks" | "tower" | "house1" | "monastery";
+export type BuildingRole = "castle" | "barracks" | "tower" | "house1" | "monastery" | `resource-${ResourceKind}`;
 
 export interface BuildingSelection {
   role: BuildingRole;

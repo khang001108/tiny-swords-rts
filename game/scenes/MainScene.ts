@@ -19,6 +19,8 @@ import {
   HOUSE_POP_BONUS,
   HOUSE_SLOTS,
   HOUSE_VILLAGER_BONUS,
+  RESOURCE_HOUSE_COST,
+  RESOURCE_HOUSE_POP_BONUS,
   MAP_PRESETS,
   MapPreset,
   MapSize,
@@ -92,7 +94,9 @@ export default class MainScene extends Phaser.Scene {
 
   private myVillagers: VillagerSystem | null = null;
   private myBasePos = { x: 0, y: 0 };
+  private myNodePosSaved: NodePositions | null = null;
   private housesBuilt = 0;
+  private resourceHouses: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
   private paused = false;
   private minimapG!: Phaser.GameObjects.Graphics;
 
@@ -240,12 +244,14 @@ export default class MainScene extends Phaser.Scene {
     gameEvents.on("spawn-unit", this.handleSpawnRequest, this);
     gameEvents.on("spawn-villager", this.handleSpawnVillager, this);
     gameEvents.on("build-house", this.handleBuildHouse, this);
+    gameEvents.on("build-resource-house", this.handleBuildResourceHouse, this);
     gameEvents.on("toggle-pause", this.handleTogglePause, this);
     gameEvents.on("leave-room", this.handleLeave, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       gameEvents.off("spawn-unit", this.handleSpawnRequest, this);
       gameEvents.off("spawn-villager", this.handleSpawnVillager, this);
       gameEvents.off("build-house", this.handleBuildHouse, this);
+    gameEvents.off("build-resource-house", this.handleBuildResourceHouse, this);
       gameEvents.off("toggle-pause", this.handleTogglePause, this);
       gameEvents.off("leave-room", this.handleLeave, this);
       this.sync?.disconnect();
@@ -393,6 +399,7 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
+    this.myNodePosSaved = myNodePos;
     this.myVillagers = new VillagerSystem(
       this,
       this.mySide === "left" ? "blue" : "red",
@@ -412,7 +419,11 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private recomputePopCap() {
-    this.popCap = computePopCap(this.preset.buildings.length, this.wood, this.meat) + this.housesBuilt * HOUSE_POP_BONUS;
+    const resourceHouseCount = Object.values(this.resourceHouses).filter(Boolean).length;
+    this.popCap =
+      computePopCap(this.preset.buildings.length, this.wood, this.meat) +
+      this.housesBuilt * HOUSE_POP_BONUS +
+      resourceHouseCount * RESOURCE_HOUSE_POP_BONUS;
   }
 
   private createAnimations() {
@@ -665,6 +676,12 @@ export default class MainScene extends Phaser.Scene {
         this.myVillagers?.reassignKind(this.selected.id, hit.getData("resourceKind"));
         return;
       }
+      if (kind === "resource" && !this.selected) {
+        const obj = hit as unknown as { x: number; y: number };
+        this.selectedBuildingPos = { x: obj.x, y: obj.y };
+        gameEvents.emit("select-building", { role: `resource-${hit.getData("resourceKind")}` });
+        return;
+      }
       if (kind === "enemy" && this.selected) {
         const obj = hit as unknown as { x: number; y: number };
         this.issueMoveCommand(obj.x, obj.y);
@@ -749,6 +766,23 @@ export default class MainScene extends Phaser.Scene {
     this.tweens.add({ targets: img, scale: 0.4, duration: 260, ease: "Back.Out" });
     this.housesBuilt++;
     this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
+    this.recomputePopCap();
+    this.emitHud();
+  }
+
+  private handleBuildResourceHouse(kind: ResourceKind) {
+    if (this.gameOver || this.resourceHouses[kind] || !this.myNodePosSaved) return;
+    if (this.gold < RESOURCE_HOUSE_COST) return;
+    this.gold -= RESOURCE_HOUSE_COST;
+    this.resourceHouses[kind] = true;
+
+    const node = this.myNodePosSaved[kind];
+    const color = this.mySide === "left" ? "blue" : "red";
+    const img = this.add.image(node.x + 26, node.y - 22, `bld_house1_${color}`).setScale(0).setDepth(4);
+    this.tweens.add({ targets: img, scale: 0.3, duration: 240, ease: "Back.Out" });
+
+    this.myVillagers?.increaseMax(1);
+    this.myVillagers?.addVillager(kind); // dân miễn phí, đi thẳng vào đúng mỏ này
     this.recomputePopCap();
     this.emitHud();
   }
@@ -1068,6 +1102,7 @@ export default class MainScene extends Phaser.Scene {
       villagerMax: this.myVillagers?.max ?? VILLAGER_MAX_COUNT,
       houses: this.housesBuilt,
       housesMax: HOUSE_MAX_COUNT,
+      resourceHouses: this.resourceHouses,
     });
   }
 

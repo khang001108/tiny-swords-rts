@@ -3,16 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
 import { gameEvents, HudUpdate, GameEndUpdate, PauseState, BuildingSelection, BuildingRole } from "@/game/events";
-import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST, HOUSE_COST } from "@/game/entities";
+import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST, HOUSE_COST, RESOURCE_HOUSE_COST, RESOURCE_LABEL, ResourceKind } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
-const BUILDING_LABEL: Record<BuildingRole, string> = {
+const BUILDING_LABEL: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
   castle: "🏰 Lâu đài",
   barracks: "⚔️ Doanh trại",
   tower: "🗼 Tháp canh",
   house1: "🏠 Nhà dân",
   monastery: "⛪ Tu viện",
 };
+function buildingLabel(role: BuildingRole): string {
+  if (role.startsWith("resource-")) {
+    const kind = role.replace("resource-", "") as ResourceKind;
+    return `🌾 Mỏ ${RESOURCE_LABEL[kind]}`;
+  }
+  return BUILDING_LABEL[role as Exclude<BuildingRole, `resource-${ResourceKind}`>];
+}
 
 export default function GameCanvas({
   roomCode,
@@ -41,6 +48,7 @@ export default function GameCanvas({
     villagerMax: 6,
     houses: 0,
     housesMax: 3,
+    resourceHouses: { wood: false, gold: false, meat: false },
   });
   const [result, setResult] = useState<GameEndUpdate | null>(null);
   const [paused, setPaused] = useState(false);
@@ -73,6 +81,7 @@ export default function GameCanvas({
   const spawn = (type: UnitType) => gameEvents.emit("spawn-unit", type);
   const spawnVillager = () => gameEvents.emit("spawn-villager");
   const buildHouse = () => gameEvents.emit("build-house");
+  const buildResourceHouse = (kind: ResourceKind) => gameEvents.emit("build-resource-house", kind);
   const togglePause = () => gameEvents.emit("toggle-pause");
   const preset = MAP_PRESETS[mapSize];
   const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
@@ -179,7 +188,7 @@ export default function GameCanvas({
 
       <div className="flex items-center gap-2 mt-3 px-1">
         <span className="text-xs text-white/60 flex items-center gap-1">
-          Đang chọn: <span className="font-semibold text-white/90">{BUILDING_LABEL[buildingRole]}</span>
+          Đang chọn: <span className="font-semibold text-white/90">{buildingLabel(buildingRole)}</span>
         </span>
       </div>
 
@@ -237,6 +246,36 @@ export default function GameCanvas({
         {buildingRole === "monastery" && (
           <p className="text-xs text-white/50 py-2">Tu viện — công trình trang trí, chưa có chức năng sản xuất.</p>
         )}
+        {buildingRole.startsWith("resource-") &&
+          (() => {
+            const kind = buildingRole.replace("resource-", "") as ResourceKind;
+            const built = hud.resourceHouses[kind];
+            if (built) {
+              return (
+                <p className="text-xs text-emerald-400 py-2">
+                  ✓ Đã có nhà cạnh mỏ {RESOURCE_LABEL[kind]} — 1 dân được cấp miễn phí, tự động khai thác ở đây mãi mãi.
+                </p>
+              );
+            }
+            const disabled = hud.gold < RESOURCE_HOUSE_COST;
+            return (
+              <button
+                onClick={() => buildResourceHouse(kind)}
+                disabled={disabled}
+                className={`h-14 min-w-[190px] transition ${disabled ? "opacity-40 grayscale" : "active:scale-[0.97]"}`}
+              >
+                <NineSlice prefix="btn-red" className="w-full h-full">
+                  <span className="font-semibold text-white text-sm px-2 flex items-center gap-1 drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+                    🏠 Xây nhà cạnh mỏ {RESOURCE_LABEL[kind]}
+                    <span className="inline-flex items-center text-xs opacity-90">
+                      <img src={icon("gold")} className="icon-inline" alt="" />
+                      {RESOURCE_HOUSE_COST}
+                    </span>
+                  </span>
+                </NineSlice>
+              </button>
+            );
+          })()}
 
         <div className="w-px h-10 bg-white/15 mx-1" />
 
@@ -266,7 +305,8 @@ export default function GameCanvas({
         </p>
       )}
       <p className="text-xs text-white/40 mt-1 px-1">
-        💡 Bấm vào 1 công trình của bạn (Lâu đài/Doanh trại/Nhà dân) để chọn nơi sản xuất — nút bên dưới sẽ đổi theo. Bấm
+        💡 Bấm vào 1 công trình của bạn (Lâu đài/Doanh trại/Nhà dân) để chọn nơi sản xuất. Bấm vào 1 mỏ tài nguyên (cây/mỏ
+        vàng/cừu) khi chưa chọn gì để xây nhà ngay cạnh đó — dân được cấp sẽ tự động khai thác đúng mỏ đó mãi mãi. Bấm
         lính/dân rồi bấm nơi muốn tới để ra lệnh.
       </p>
     </div>

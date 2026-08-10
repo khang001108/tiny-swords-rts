@@ -300,6 +300,10 @@ export const HOUSE_SLOTS: { offsetX: number; offsetY: number }[] = [
   { offsetX: 150, offsetY: 130 },
 ];
 
+// ── Nhà cạnh mỏ tài nguyên — xây xong tự cấp 1 dân khóa cứng vào đúng mỏ đó ──
+export const RESOURCE_HOUSE_COST = 35;
+export const RESOURCE_HOUSE_POP_BONUS = 2;
+
 // ── Hiệu ứng ─────────────────────────────────────────────────────────
 export const FX_DUST_FRAMES = 8;
 export const FX_EXPLOSION_FRAMES = 10;
