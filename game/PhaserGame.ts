@@ -6,7 +6,7 @@ export function createPhaserGame(
   parent: HTMLDivElement,
   roomCode: string,
   isHost: boolean,
-  mode: "bot" | "online",
+  mode: "bot" | "online" | "endless",
   mapSize: MapSize
 ): Phaser.Game {
   const preset = MAP_PRESETS[mapSize] ?? MAP_PRESETS.medium;

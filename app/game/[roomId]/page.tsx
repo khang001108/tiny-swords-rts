@@ -17,9 +17,10 @@ const GameCanvas = dynamic(() => import("@/components/GameCanvas"), {
 export default function GameRoomPage({ params }: { params: { roomId: string } }) {
   const searchParams = useSearchParams();
   const isHost = searchParams.get("host") === "1";
-  const mode = (searchParams.get("mode") === "bot" ? "bot" : "online") as "bot" | "online";
+  const modeParam = searchParams.get("mode");
+  const mode = (modeParam === "bot" || modeParam === "endless" ? modeParam : "online") as "bot" | "online" | "endless";
   const mapParam = searchParams.get("map") as MapSize | null;
-  const mapSize: MapSize = mode === "bot" ? mapParam ?? "medium" : mapSizeFromRoomCode(params.roomId);
+  const mapSize: MapSize = mode === "online" ? mapSizeFromRoomCode(params.roomId) : mapParam ?? "medium";
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center py-6 px-2">

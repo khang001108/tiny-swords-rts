@@ -43,4 +43,10 @@ export interface FfaHudUpdate {
 
 export interface GameEndUpdate {
   youWin: boolean;
+  wave?: number;
+  timeSec?: number;
+}
+
+export interface EndlessWaveUpdate {
+  wave: number;
 }

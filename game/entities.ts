@@ -1,4 +1,4 @@
-export type UnitType = "pawn" | "warrior" | "archer";
+export type UnitType = "pawn" | "warrior" | "archer" | "monk";
 
 export interface UnitConfig {
   key: UnitType;
@@ -7,9 +7,11 @@ export interface UnitConfig {
   hp: number;
   damage: number;
   speed: number; // px/s
-  range: number; // px — khoảng cách để tấn công
+  range: number; // px — khoảng cách để tấn công (hoặc hồi máu, nếu role="heal")
   attackCooldownMs: number;
   spriteFrame: number; // frame tĩnh dùng làm icon/hiển thị
+  role?: "attack" | "heal";
+  healAmount?: number;
 }
 
 export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
@@ -45,6 +47,19 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
     range: 130,
     attackCooldownMs: 1000,
     spriteFrame: 0,
+  },
+  monk: {
+    key: "monk",
+    label: "Thầy tu",
+    cost: 40,
+    hp: 50,
+    damage: 0,
+    speed: 40,
+    range: 95,
+    attackCooldownMs: 1600,
+    spriteFrame: 0,
+    role: "heal",
+    healAmount: 14,
   },
 };
 
@@ -180,6 +195,8 @@ export const UNIT_ANIM: Record<UnitType, AnimLayout> = {
   pawn: { cols: 6, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 6, frameRate: 9 },
   warrior: { cols: 6, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 6, frameRate: 9 },
   archer: { cols: 8, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 8, frameRate: 10 },
+  // monk dùng chế độ "perAction" (UNIT_PERACTION_FRAMES) — mục này chỉ để thoả kiểu, không thực sự dùng tới.
+  monk: { cols: 6, idleRow: 0, walkRow: 1, attackRow: 2, idleFrames: 6, walkFrames: 6, attackFrames: 6, frameRate: 9 },
 };
 
 function animFrames(row: number, cols: number, count: number) {
@@ -201,11 +218,13 @@ export const UNIT_SPRITE_MODE: Record<UnitType, SpriteMode> = {
   pawn: "sheet",
   warrior: "perAction",
   archer: "perAction",
+  monk: "perAction",
 };
 
 export const UNIT_PERACTION_FRAMES: Partial<Record<UnitType, { idle: number; walk: number; attack: number }>> = {
   warrior: { idle: 8, walk: 6, attack: 4 },
   archer: { idle: 6, walk: 4, attack: 8 },
+  monk: { idle: 6, walk: 4, attack: 11 },
 };
 
 // ── Dân (villager) — đi khai thác Gỗ / Vàng / Thịt ──────────────────────
@@ -282,6 +301,27 @@ export const FFA_STARTING_GOLD = 70;
 export const FFA_GOLD_INCOME = 3;
 export const FFA_POP_CAP = 10;
 export const FFA_BOT_POP_CAP = 8;
+
+// ── Slider chọn kích thước map (thay cho 3 nút cố định) ───────────────
+export const MAP_SIZE_ORDER: MapSize[] = ["small", "medium", "large"];
+export function sliderToMapSize(t: number): MapSize {
+  if (t < 34) return "small";
+  if (t < 67) return "medium";
+  return "large";
+}
+export function mapSizeToSlider(size: MapSize): number {
+  return size === "small" ? 0 : size === "medium" ? 50 : 100;
+}
+
+// ── Endless Mode — sóng địch vô tận, càng lâu càng khó, lưu kỷ lục ─────
+export const ENDLESS_WAVE_INTERVAL_MS = 25000;
+export const ENDLESS_MIN_SPAWN_MS = 550;
+export const ENDLESS_SPAWN_DECAY = 0.92; // mỗi wave giảm 8% thời gian hồi lính của địch
+export const ENDLESS_STAT_GROWTH = 0.09; // mỗi wave lính địch +9% máu/dame
+export const ENDLESS_RECORD_KEY = "tiny-swords-endless-record";
+
+// ── Mây trang trí (layer trên cùng của bản đồ) ─────────────────────────
+export const CLOUD_KEYS = ["cloud1", "cloud2", "cloud3"];
 
 export function computePopCap(buildingsCount: number, wood: number, meat: number): number {
   const bonus = Math.min(RESOURCE_CAP_MAX_BONUS, Math.floor((wood + meat) / RESOURCE_CAP_UNIT));

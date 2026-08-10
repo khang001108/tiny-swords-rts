@@ -2,8 +2,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPhaserGame } from "@/game/PhaserGame";
-import { gameEvents, HudUpdate, GameEndUpdate, PauseState, BuildingSelection, BuildingRole } from "@/game/events";
-import { UNIT_CONFIGS, UnitType, MapSize, MAP_PRESETS, VILLAGER_COST, HOUSE_COST, RESOURCE_HOUSE_COST, RESOURCE_LABEL, ResourceKind } from "@/game/entities";
+import {
+  gameEvents,
+  HudUpdate,
+  GameEndUpdate,
+  PauseState,
+  BuildingSelection,
+  BuildingRole,
+  EndlessWaveUpdate,
+} from "@/game/events";
+import {
+  UNIT_CONFIGS,
+  UnitType,
+  MapSize,
+  MAP_PRESETS,
+  VILLAGER_COST,
+  HOUSE_COST,
+  RESOURCE_HOUSE_COST,
+  RESOURCE_LABEL,
+  ResourceKind,
+  ENDLESS_RECORD_KEY,
+} from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 const BUILDING_LABEL: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
@@ -29,7 +48,7 @@ export default function GameCanvas({
 }: {
   roomCode: string;
   isHost: boolean;
-  mode: "bot" | "online";
+  mode: "bot" | "online" | "endless";
   mapSize: MapSize;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -53,25 +72,58 @@ export default function GameCanvas({
   const [result, setResult] = useState<GameEndUpdate | null>(null);
   const [paused, setPaused] = useState(false);
   const [buildingRole, setBuildingRole] = useState<BuildingRole>("castle");
+  const [wave, setWave] = useState(1);
+  const [bestRecord, setBestRecord] = useState<{ wave: number; timeSec: number } | null>(null);
+  const [isNewRecord, setIsNewRecord] = useState(false);
+
+  useEffect(() => {
+    if (mode !== "endless") return;
+    try {
+      const raw = localStorage.getItem(ENDLESS_RECORD_KEY);
+      if (raw) setBestRecord(JSON.parse(raw));
+    } catch {
+      // localStorage có thể bị chặn (chế độ riêng tư) — bỏ qua, không có kỷ lục lưu được
+    }
+  }, [mode]);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const game = createPhaserGame(containerRef.current, roomCode, isHost, mode, mapSize);
 
     const onHud = (p: HudUpdate) => setHud(p);
-    const onEnd = (p: GameEndUpdate) => setResult(p);
+    const onEnd = (p: GameEndUpdate) => {
+      setResult(p);
+      if (mode === "endless" && p.wave !== undefined && p.timeSec !== undefined) {
+        const isBetter = !bestRecord || p.wave > bestRecord.wave || (p.wave === bestRecord.wave && p.timeSec > bestRecord.timeSec);
+        if (isBetter) {
+          const rec = { wave: p.wave, timeSec: p.timeSec };
+          setBestRecord(rec);
+          setIsNewRecord(true);
+          try {
+            localStorage.setItem(ENDLESS_RECORD_KEY, JSON.stringify(rec));
+          } catch {
+            // bỏ qua nếu không lưu được
+          }
+        } else {
+          setIsNewRecord(false);
+        }
+      }
+    };
     const onPause = (p: PauseState) => setPaused(p.paused);
     const onBuilding = (p: BuildingSelection) => setBuildingRole(p.role);
+    const onWave = (p: EndlessWaveUpdate) => setWave(p.wave);
     gameEvents.on("hud-update", onHud);
     gameEvents.on("game-end", onEnd);
     gameEvents.on("pause-state", onPause);
     gameEvents.on("select-building", onBuilding);
+    gameEvents.on("endless-wave", onWave);
 
     return () => {
       gameEvents.off("hud-update", onHud);
       gameEvents.off("game-end", onEnd);
       gameEvents.off("pause-state", onPause);
       gameEvents.off("select-building", onBuilding);
+      gameEvents.off("endless-wave", onWave);
       gameEvents.emit("leave-room");
       game.destroy(true);
     };
@@ -93,11 +145,15 @@ export default function GameCanvas({
           <span>
             Phòng: <span className="font-mono font-bold">{roomCode}</span>
           </span>
+        ) : mode === "endless" ? (
+          <span className="text-[#3a2c1a]/60 flex items-center gap-1">🌊 Endless Mode</span>
         ) : (
           <span className="text-[#3a2c1a]/60">Chế độ: Đấu với Bot</span>
         )}
         <span>
-          {hud.opponentConnected ? (
+          {mode === "endless" ? (
+            <span className="text-emerald-700 font-medium">Sóng {wave}</span>
+          ) : hud.opponentConnected ? (
             <span className="text-emerald-700 font-medium">● Đối thủ đã vào</span>
           ) : (
             <span className="text-amber-700 font-medium">● Đang chờ đối thủ...</span>
@@ -125,23 +181,33 @@ export default function GameCanvas({
         </span>
         <button
           onClick={togglePause}
-          className="ml-auto px-2.5 py-1 rounded bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 text-xs font-semibold"
+          className="ml-auto px-2.5 py-1 rounded bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 text-xs font-semibold flex items-center gap-1"
           title={mode === "online" ? "Chỉ tạm dừng phía bạn — đối thủ vẫn tiếp tục" : "Tạm dừng"}
         >
-          {paused ? "▶ Tiếp tục" : "⏸ Tạm dừng"}
+          <img src={icon(paused ? "play" : "settings")} className="icon-inline m-0" alt="" />
+          {paused ? "Tiếp tục" : "Tạm dừng"}
         </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2 mb-2 px-1">
         <BaseBar label="Căn cứ của bạn" hp={hud.myBaseHp} max={hud.myBaseMaxHp} color="bg-blue-500" icon={icon("shield")} />
-        <BaseBar
-          label="Căn cứ đối thủ"
-          hp={hud.enemyBaseHp}
-          max={hud.enemyBaseMaxHp}
-          color="bg-red-500"
-          icon={icon("shield")}
-          align="right"
-        />
+        {mode === "endless" ? (
+          <div className="text-right">
+            <div className="text-xs text-white/70 mb-0.5">Kỷ lục</div>
+            <div className="text-sm font-bold text-amber-300">
+              {bestRecord ? `Sóng ${bestRecord.wave} · ${formatTime(bestRecord.timeSec)}` : "Chưa có"}
+            </div>
+          </div>
+        ) : (
+          <BaseBar
+            label="Căn cứ đối thủ"
+            hp={hud.enemyBaseHp}
+            max={hud.enemyBaseMaxHp}
+            color="bg-red-500"
+            icon={icon("shield")}
+            align="right"
+          />
+        )}
       </div>
 
       <div
@@ -168,12 +234,20 @@ export default function GameCanvas({
         )}
         {result && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70">
-            <NineSlice prefix="paper" style={{ width: 340, height: 220 }}>
-              <div className="flex flex-col items-center gap-3 px-4">
+            <NineSlice prefix="paper" style={{ width: 340, height: mode === "endless" ? 260 : 220 }}>
+              <div className="flex flex-col items-center gap-2 px-4">
                 <div className={`text-3xl font-extrabold ${result.youWin ? "text-emerald-700" : "text-red-700"}`}>
-                  {result.youWin ? "🏆 BẠN THẮNG!" : "💀 BẠN THUA"}
+                  {mode === "endless" ? "💀 ĐÃ GỤC NGÃ" : result.youWin ? "🏆 BẠN THẮNG!" : "💀 BẠN THUA"}
                 </div>
-                <a href="/" className="w-40 h-12 block">
+                {mode === "endless" && result.wave !== undefined && result.timeSec !== undefined && (
+                  <div className="text-center text-[#3a2c1a] text-sm">
+                    <div>
+                      Trụ được <b>Sóng {result.wave}</b> — <b>{formatTime(result.timeSec)}</b>
+                    </div>
+                    {isNewRecord && <div className="text-amber-600 font-bold mt-1">🎉 Kỷ lục mới!</div>}
+                  </div>
+                )}
+                <a href="/" className="w-40 h-12 block mt-1">
                   <NineSlice prefix="btn-blue" className="w-full h-full">
                     <span className="font-bold text-white text-sm drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
                       Về sảnh chờ
@@ -311,6 +385,12 @@ export default function GameCanvas({
       </p>
     </div>
   );
+}
+
+function formatTime(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function BaseBar({

@@ -2,6 +2,10 @@ import { GameOverPayload, HitPayload, OpponentLink, Side, StatePayload, UnitSnap
 import {
   BASE_MAX_HP,
   BASE_POP_CAP,
+  ENDLESS_MIN_SPAWN_MS,
+  ENDLESS_SPAWN_DECAY,
+  ENDLESS_STAT_GROWTH,
+  ENDLESS_WAVE_INTERVAL_MS,
   GOLD_INCOME_PER_SEC,
   MapPreset,
   POP_CAP_PER_BUILDING,
@@ -54,6 +58,11 @@ export class BotOpponent implements OpponentLink {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private spawnTimer: ReturnType<typeof setInterval> | null = null;
   private goldTimer: ReturnType<typeof setInterval> | null = null;
+  private waveTimer: ReturnType<typeof setInterval> | null = null;
+
+  private wave = 1;
+  private curSpawnMs: number;
+  private statMult = 1;
 
   private readonly leftBaseX: number;
   private readonly rightBaseX: number;
@@ -65,16 +74,22 @@ export class BotOpponent implements OpponentLink {
   private readonly riverXMax: number;
   private readonly bridgeYs: number[];
 
-  constructor(private preset: MapPreset, private difficulty: "easy" | "normal" | "hard" = "normal") {
+  constructor(
+    private preset: MapPreset,
+    private difficulty: "easy" | "normal" | "hard" = "normal",
+    private endless = false,
+    private onWaveChange?: (wave: number) => void
+  ) {
     this.leftBaseX = preset.baseMargin;
     this.rightBaseX = preset.worldW - preset.baseMargin;
     this.midY = preset.worldH / 2;
     this.laneYMin = preset.laneYMin;
     this.laneYMax = preset.laneYMax;
-    this.popCap = BASE_POP_CAP + preset.buildings.length * POP_CAP_PER_BUILDING;
+    this.popCap = endless ? 40 : BASE_POP_CAP + preset.buildings.length * POP_CAP_PER_BUILDING;
     this.riverXMin = preset.riverX - preset.riverWidth / 2;
     this.riverXMax = preset.riverX + preset.riverWidth / 2;
     this.bridgeYs = preset.bridgeYs;
+    this.curSpawnMs = this.difficulty === "hard" ? 1100 : this.difficulty === "easy" ? 2200 : 1600;
   }
 
   on(handlers: Handlers) {
@@ -98,6 +113,7 @@ export class BotOpponent implements OpponentLink {
   sendHit(targetId: string, damage: number) {
     if (this.ended) return;
     if (targetId === "base") {
+      if (this.endless) return; // Endless: căn cứ địch bất tử, không có "thắng" — chỉ có sống sót
       this.baseHp = Math.max(0, this.baseHp - damage);
       if (this.baseHp <= 0) this.finish("right");
       return;
@@ -132,27 +148,39 @@ export class BotOpponent implements OpponentLink {
   }
 
   private start() {
-    const spawnEveryMs = this.difficulty === "hard" ? 1100 : this.difficulty === "easy" ? 2200 : 1600;
     this.lastTickAt = performance.now();
     this.tickTimer = setInterval(() => this.tick(), 110);
-    this.spawnTimer = setInterval(() => this.maybeSpawn(), spawnEveryMs);
+    this.spawnTimer = setInterval(() => this.maybeSpawn(), this.curSpawnMs);
     this.goldTimer = setInterval(() => {
       // Bot không có dân đi khai thác, nên bù thêm để kinh tế cân bằng với người chơi
       // (người chơi có dân mỏ vàng mang về ngoài thu nhập thụ động).
       this.gold += GOLD_INCOME_PER_SEC + 3;
     }, 1000);
+    if (this.endless) {
+      this.waveTimer = setInterval(() => this.advanceWave(), ENDLESS_WAVE_INTERVAL_MS);
+    }
+  }
+
+  private advanceWave() {
+    this.wave++;
+    this.statMult = 1 + (this.wave - 1) * ENDLESS_STAT_GROWTH;
+    this.curSpawnMs = Math.max(ENDLESS_MIN_SPAWN_MS, this.curSpawnMs * ENDLESS_SPAWN_DECAY);
+    if (this.spawnTimer) clearInterval(this.spawnTimer);
+    this.spawnTimer = setInterval(() => this.maybeSpawn(), this.curSpawnMs);
+    this.onWaveChange?.(this.wave);
   }
 
   private stop() {
     if (this.tickTimer) clearInterval(this.tickTimer);
     if (this.spawnTimer) clearInterval(this.spawnTimer);
     if (this.goldTimer) clearInterval(this.goldTimer);
-    this.tickTimer = this.spawnTimer = this.goldTimer = null;
+    if (this.waveTimer) clearInterval(this.waveTimer);
+    this.tickTimer = this.spawnTimer = this.goldTimer = this.waveTimer = null;
   }
 
   private maybeSpawn() {
     if (this.ended || this.units.size >= this.popCap) return;
-    const types = Object.values(UNIT_CONFIGS).filter((c) => c.cost <= this.gold);
+    const types = Object.values(UNIT_CONFIGS).filter((c) => c.cost <= this.gold && c.role !== "heal");
     if (!types.length) return;
     const cfg = types[Math.floor(Math.random() * types.length)];
     this.gold -= cfg.cost;
@@ -162,8 +190,8 @@ export class BotOpponent implements OpponentLink {
       type: cfg.key,
       x: this.rightBaseX - 60,
       y: this.laneYMin + Math.random() * (this.laneYMax - this.laneYMin),
-      hp: cfg.hp,
-      maxHp: cfg.hp,
+      hp: Math.round(cfg.hp * this.statMult),
+      maxHp: Math.round(cfg.hp * this.statMult),
       state: "walk",
       lastAttackAt: 0,
     });
@@ -226,10 +254,11 @@ export class BotOpponent implements OpponentLink {
         u.state = "attack";
         if (now - u.lastAttackAt >= cfg.attackCooldownMs) {
           u.lastAttackAt = now;
+          const dmg = Math.round(cfg.damage * this.statMult);
           if (canHitUnit && nearest) {
-            this.handlers.onHit?.({ from: this.playerId, targetId: nearest.id, damage: cfg.damage });
+            this.handlers.onHit?.({ from: this.playerId, targetId: nearest.id, damage: dmg });
           } else {
-            this.handlers.onHit?.({ from: this.playerId, targetId: "base", damage: cfg.damage });
+            this.handlers.onHit?.({ from: this.playerId, targetId: "base", damage: dmg });
           }
         }
       } else {

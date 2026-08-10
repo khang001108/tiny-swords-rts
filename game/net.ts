@@ -6,7 +6,7 @@ export type Side = "left" | "right";
 
 export interface UnitSnapshot {
   id: string;
-  type: "pawn" | "warrior" | "archer";
+  type: "pawn" | "warrior" | "archer" | "monk";
   x: number;
   y: number;
   hp: number;

@@ -10,6 +10,7 @@ import { BotOpponent } from "@/game/opponent";
 import {
   BASE_MAX_HP,
   BUILDING_VISUALS,
+  CLOUD_KEYS,
   FRAME_SIZE,
   FX_DUST_FRAMES,
   FX_EXPLOSION_FRAMES,
@@ -77,7 +78,7 @@ interface RemoteUnit {
 export default class MainScene extends Phaser.Scene {
   private roomCode!: string;
   private isHost!: boolean;
-  private mode!: "bot" | "online";
+  private mode!: "bot" | "online" | "endless";
   private preset!: MapPreset;
 
   private sync!: OpponentLink;
@@ -98,6 +99,8 @@ export default class MainScene extends Phaser.Scene {
   private housesBuilt = 0;
   private resourceHouses: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
   private paused = false;
+  private currentWave = 1;
+  private matchStartMs = 0;
   private minimapG!: Phaser.GameObjects.Graphics;
 
   private myCastle!: Phaser.GameObjects.Image;
@@ -108,10 +111,13 @@ export default class MainScene extends Phaser.Scene {
   private myTowerPos: { x: number; y: number } | null = null;
   private towerLastAttackAt = 0;
 
-  private selected: { kind: "unit" | "villager"; id: string } | null = null;
+  private selected: { kind: "unit" | "villager"; id: string }[] = [];
   private selectionRing!: Phaser.GameObjects.Graphics;
   private buildingRing!: Phaser.GameObjects.Graphics;
   private selectedBuildingPos: { x: number; y: number } | null = null;
+  private dragStart: { x: number; y: number } | null = null;
+  private isDragging = false;
+  private dragBoxG!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
   private riverBand: { xMin: number; xMax: number } | null = null;
@@ -127,7 +133,7 @@ export default class MainScene extends Phaser.Scene {
     super("MainScene");
   }
 
-  init(data: { roomCode: string; isHost: boolean; mode: "bot" | "online"; mapSize: MapSize }) {
+  init(data: { roomCode: string; isHost: boolean; mode: "bot" | "online" | "endless"; mapSize: MapSize }) {
     this.roomCode = data.roomCode;
     this.isHost = data.isHost;
     this.mode = data.mode;
@@ -149,7 +155,12 @@ export default class MainScene extends Phaser.Scene {
     this.load.image("goldmine", "/assets/ui/GoldMine_Active.png");
     this.load.image("banner", "/assets/ui/Banner_Vertical.png");
     this.load.image("hill", "/assets/terrain/hill.png");
+    this.load.image("islet_flat", "/assets/terrain/islet_flat.png");
+    this.load.image("islet_cliff", "/assets/terrain/islet_cliff.png");
     this.load.image("water_tile", "/assets/terrain/water_tile.png");
+    this.load.image("cloud1", "/assets/terrain/clouds/cloud1.png");
+    this.load.image("cloud2", "/assets/terrain/clouds/cloud2.png");
+    this.load.image("cloud3", "/assets/terrain/clouds/cloud3.png");
 
     this.load.image("castle_blue", "/assets/buildings/Castle_Blue.png");
     this.load.image("castle_red", "/assets/buildings/Castle_Red.png");
@@ -191,6 +202,18 @@ export default class MainScene extends Phaser.Scene {
         frameHeight: FRAME_SIZE,
       });
       this.load.spritesheet(`archer_${color}_attack`, `/assets/units2/archer_${color}_attack.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`monk_${color}_idle`, `/assets/units2/monk_${color}_idle.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`monk_${color}_run`, `/assets/units2/monk_${color}_run.png`, {
+        frameWidth: FRAME_SIZE,
+        frameHeight: FRAME_SIZE,
+      });
+      this.load.spritesheet(`monk_${color}_attack`, `/assets/units2/monk_${color}_attack.png`, {
         frameWidth: FRAME_SIZE,
         frameHeight: FRAME_SIZE,
       });
@@ -261,9 +284,14 @@ export default class MainScene extends Phaser.Scene {
     this.minimapG = this.add.graphics().setDepth(100).setScrollFactor(0);
     this.selectionRing = this.add.graphics().setDepth(12);
     this.buildingRing = this.add.graphics().setDepth(12);
+    this.dragBoxG = this.add.graphics().setDepth(13);
     this.input.on("pointerdown", this.handlePointerDown, this);
+    this.input.on("pointermove", this.handlePointerMove, this);
+    this.input.on("pointerup", this.handlePointerUp, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off("pointerdown", this.handlePointerDown, this);
+      this.input.off("pointermove", this.handlePointerMove, this);
+      this.input.off("pointerup", this.handlePointerUp, this);
     });
 
     this.connectRoom();
@@ -289,7 +317,14 @@ export default class MainScene extends Phaser.Scene {
 
   private async connectRoom() {
     this.sync =
-      this.mode === "bot" ? new BotOpponent(this.preset) : new RoomSync(this.roomCode, this.isHost);
+      this.mode === "bot"
+        ? new BotOpponent(this.preset)
+        : this.mode === "endless"
+        ? new BotOpponent(this.preset, "normal", true, (wave) => {
+            this.currentWave = wave;
+            gameEvents.emit("endless-wave", { wave });
+          })
+        : new RoomSync(this.roomCode, this.isHost);
 
     this.sync.on({
       onState: (p) => this.applyRemoteState(p),
@@ -306,7 +341,8 @@ export default class MainScene extends Phaser.Scene {
     });
     const side = await this.sync.connect();
     this.mySide = side;
-    this.opponentConnected = this.mode === "bot" ? true : this.opponentConnected;
+    this.opponentConnected = this.mode !== "online" ? true : this.opponentConnected;
+    this.matchStartMs = this.time.now;
     this.layoutBases();
     this.emitHud();
   }
@@ -428,7 +464,7 @@ export default class MainScene extends Phaser.Scene {
 
   private createAnimations() {
     const colors: Array<"blue" | "red"> = ["blue", "red"];
-    const types: UnitType[] = ["pawn", "warrior", "archer"];
+    const types: UnitType[] = ["pawn", "warrior", "archer", "monk"];
     for (const type of types) {
       for (const color of colors) {
         const key = `${type}_${color}`;
@@ -482,6 +518,12 @@ export default class MainScene extends Phaser.Scene {
     });
   }
 
+  private playHealFx(x: number, y: number) {
+    const s = this.add.sprite(x, y - 20, "fx_dust", 0).setScale(0.5).setDepth(15).setTint(0x8ef58e);
+    s.play("fx_dust-play");
+    s.once("animationcomplete", () => s.destroy());
+  }
+
   private playDeathFx(x: number, y: number) {
     const s = this.add.sprite(x, y, "fx_dust", 0).setScale(0.8).setDepth(15);
     s.play("fx_dust-play");
@@ -503,13 +545,28 @@ export default class MainScene extends Phaser.Scene {
     const { worldW, worldH, laneYMin, laneYMax, grassTexture, treeSpacing } = this.preset;
     this.cameras.main.setBackgroundColor("#2f4d2a");
 
-    const bg = this.add.tileSprite(0, 0, worldW, worldH, grassTexture).setOrigin(0, 0).setDepth(0);
+    // Lớp 1 — biển bao quanh (chỉ lộ ra thành viền trên/dưới, đảo đất là lớp 2 nổi lên trên)
+    const seaRim = 26;
+    const sea = this.add.tileSprite(0, 0, worldW, worldH, "water_tile").setOrigin(0, 0).setDepth(-1);
+    sea.setTileScale(1, 1);
+
+    // Lớp 2 — đảo đất chính (thụt vào so với mép biển)
+    const bg = this.add.tileSprite(0, seaRim, worldW, worldH - seaRim * 2, grassTexture).setOrigin(0, 0).setDepth(0);
     bg.setTileScale(0.9, 0.9);
+
+    // Viền vách nhẹ giữa đất và biển
+    const shore = this.add.graphics().setDepth(0.5);
+    shore.lineStyle(3, 0xd8f0e8, 0.4);
+    shore.lineBetween(0, seaRim, worldW, seaRim);
+    shore.lineBetween(0, worldH - seaRim, worldW, worldH - seaRim);
+    shore.lineStyle(1.5, 0x0e5f5a, 0.3);
+    shore.lineBetween(0, seaRim - 2, worldW, seaRim - 2);
+    shore.lineBetween(0, worldH - seaRim + 2, worldW, worldH - seaRim + 2);
 
     const field = this.add.graphics().setDepth(0);
     field.fillStyle(0x000000, 0.08);
-    field.fillRect(0, 0, worldW, laneYMin - 40);
-    field.fillRect(0, laneYMax + 40, worldW, worldH - (laneYMax + 40));
+    field.fillRect(0, seaRim, worldW, laneYMin - 40 - seaRim);
+    field.fillRect(0, laneYMax + 40, worldW, worldH - seaRim - (laneYMax + 40));
 
     const midLine = this.add.graphics().setDepth(2);
     midLine.lineStyle(3, 0xffffff, 0.2);
@@ -520,8 +577,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     const treeKeys = ["tree_a", "tree_b", "tree_c"];
-    const topY = 18;
-    const bottomY = worldH - 8;
+    const topY = seaRim + 8;
+    const bottomY = worldH - seaRim - 8;
     let i = 0;
     for (let x = -10; x < worldW + 40; x += treeSpacing) {
       const key = treeKeys[i % treeKeys.length];
@@ -545,8 +602,36 @@ export default class MainScene extends Phaser.Scene {
       d++;
     }
 
+    // Vài đảo nhỏ nổi ngoài biển (thuần trang trí) ở 2 góc — lớp "đất" phụ, tăng cảm giác quần đảo
+    this.add.image(60, 6, "islet_flat").setScale(0.22).setDepth(1).setAlpha(0.95);
+    this.add.image(worldW - 60, worldH - 6, "islet_flat").setScale(0.2).setDepth(1).setAlpha(0.95);
+
     this.buildRiver();
     this.buildHills();
+    this.buildClouds();
+  }
+
+  /** Layer trên cùng — vài đám mây trôi ngang qua bản đồ, chỉ trang trí không cản gì */
+  private buildClouds() {
+    const count = Math.max(3, Math.round(this.preset.worldW / 420));
+    for (let i = 0; i < count; i++) {
+      const key = CLOUD_KEYS[i % CLOUD_KEYS.length];
+      const y = Phaser.Math.Between(30, this.preset.worldH - 30);
+      const startX = Phaser.Math.Between(-100, this.preset.worldW + 100);
+      const cloud = this.add.image(startX, y, key).setDepth(30).setAlpha(0.55).setScale(Phaser.Math.FloatBetween(0.7, 1.1));
+      const speed = Phaser.Math.FloatBetween(6, 14);
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      this.tweens.add({
+        targets: cloud,
+        x: dir > 0 ? this.preset.worldW + 120 : -120,
+        duration: ((this.preset.worldW + 220) / speed) * 1000,
+        repeat: -1,
+        onRepeat: () => {
+          cloud.x = dir > 0 ? -120 : this.preset.worldW + 120;
+          cloud.y = Phaser.Math.Between(30, this.preset.worldH - 30);
+        },
+      });
+    }
   }
 
   private buildRiver() {
@@ -585,12 +670,13 @@ export default class MainScene extends Phaser.Scene {
     this.hillObstacles = [];
     for (const h of this.preset.hillSpecs) {
       const shadow = this.add.graphics().setDepth(2);
-      shadow.fillStyle(0x000000, 0.2);
-      shadow.fillEllipse(h.x, h.y + 46 * h.scale, 120 * h.scale, 30 * h.scale);
-      this.add.image(h.x, h.y, "hill").setScale(h.scale).setDepth(3);
+      shadow.fillStyle(0x000000, 0.22);
+      shadow.fillEllipse(h.x, h.y + 60 * h.scale, 130 * h.scale, 26 * h.scale);
+      // Lớp 3 — đảo đá cao hơn mặt đất chính (dùng đúng prop vách đá thật của bộ Tiny Swords)
+      this.add.image(h.x, h.y, "islet_cliff").setScale(h.scale * 0.75).setDepth(3);
       const rockKey = Phaser.Math.RND.pick(["deco_rock", "deco_bush"]);
-      this.add.image(h.x - 18 * h.scale, h.y - 10 * h.scale, rockKey).setScale(0.5 * h.scale).setDepth(4);
-      this.hillObstacles.push({ x: h.x, y: h.y, r: 58 * h.scale });
+      this.add.image(h.x - 24 * h.scale, h.y - 40 * h.scale, rockKey).setScale(0.45 * h.scale).setDepth(4);
+      this.hillObstacles.push({ x: h.x, y: h.y, r: 52 * h.scale });
     }
   }
 
@@ -654,7 +740,7 @@ export default class MainScene extends Phaser.Scene {
     return this.applyHillAvoidance(x, y, wp.x, wp.y);
   }
 
-  // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh ───────────
+  // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh (hỗ trợ kéo-chọn nhiều) ──
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
     const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
@@ -663,53 +749,119 @@ export default class MainScene extends Phaser.Scene {
     if (hit) {
       const kind = hit.getData("kind");
       if (kind === "my-unit") {
-        this.selected = { kind: "unit", id: hit.getData("unitId") };
+        this.selected = [{ kind: "unit", id: hit.getData("unitId") }];
         this.selectedBuildingPos = null;
         return;
       }
       if (kind === "my-villager") {
-        this.selected = { kind: "villager", id: hit.getData("villagerId") };
+        this.selected = [{ kind: "villager", id: hit.getData("villagerId") }];
         this.selectedBuildingPos = null;
         return;
       }
-      if (kind === "resource" && this.selected?.kind === "villager") {
-        this.myVillagers?.reassignKind(this.selected.id, hit.getData("resourceKind"));
+      if (kind === "resource" && this.selected.some((s) => s.kind === "villager")) {
+        for (const s of this.selected) {
+          if (s.kind === "villager") this.myVillagers?.reassignKind(s.id, hit.getData("resourceKind"));
+        }
         return;
       }
-      if (kind === "resource" && !this.selected) {
+      if (kind === "resource" && this.selected.length === 0) {
         const obj = hit as unknown as { x: number; y: number };
         this.selectedBuildingPos = { x: obj.x, y: obj.y };
         gameEvents.emit("select-building", { role: `resource-${hit.getData("resourceKind")}` });
         return;
       }
-      if (kind === "enemy" && this.selected) {
+      if (kind === "enemy" && this.selected.length > 0) {
         const obj = hit as unknown as { x: number; y: number };
         this.issueMoveCommand(obj.x, obj.y);
         return;
       }
-      if (kind === "my-building" && !this.selected) {
+      if (kind === "my-building" && this.selected.length === 0) {
         const obj = hit as unknown as { x: number; y: number };
         this.selectedBuildingPos = { x: obj.x, y: obj.y };
         gameEvents.emit("select-building", { role: hit.getData("role") });
         return;
       }
     }
-    if (this.selected) {
-      this.issueMoveCommand(pointer.worldX, pointer.worldY);
+
+    // Không trúng gì cụ thể — có thể là bắt đầu kéo chọn vùng, hoặc lệnh di chuyển tới điểm trống
+    this.dragStart = { x: pointer.worldX, y: pointer.worldY };
+    this.isDragging = false;
+  }
+
+  private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.dragStart || !pointer.isDown) return;
+    const dx = pointer.worldX - this.dragStart.x;
+    const dy = pointer.worldY - this.dragStart.y;
+    if (!this.isDragging && Math.hypot(dx, dy) > 8) this.isDragging = true;
+    if (this.isDragging) {
+      this.dragBoxG.clear();
+      this.dragBoxG.lineStyle(1.5, 0x8ef58e, 0.9);
+      this.dragBoxG.fillStyle(0x8ef58e, 0.12);
+      const x = Math.min(this.dragStart.x, pointer.worldX);
+      const y = Math.min(this.dragStart.y, pointer.worldY);
+      const w = Math.abs(dx);
+      const h = Math.abs(dy);
+      this.dragBoxG.fillRect(x, y, w, h);
+      this.dragBoxG.strokeRect(x, y, w, h);
     }
   }
 
+  private handlePointerUp(pointer: Phaser.Input.Pointer) {
+    if (this.gameOver || this.paused) {
+      this.dragStart = null;
+      this.isDragging = false;
+      this.dragBoxG.clear();
+      return;
+    }
+    if (this.isDragging && this.dragStart) {
+      const x1 = Math.min(this.dragStart.x, pointer.worldX);
+      const x2 = Math.max(this.dragStart.x, pointer.worldX);
+      const y1 = Math.min(this.dragStart.y, pointer.worldY);
+      const y2 = Math.max(this.dragStart.y, pointer.worldY);
+      const picked: { kind: "unit" | "villager"; id: string }[] = [];
+      for (const u of this.localUnits.values()) {
+        if (u.state === "dead") continue;
+        if (u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2) picked.push({ kind: "unit", id: u.id });
+      }
+      if (this.myVillagers) {
+        for (const v of this.myVillagers.sprites) {
+          if (v.x >= x1 && v.x <= x2 && v.y >= y1 && v.y <= y2) {
+            const id = v.getData("villagerId");
+            if (id) picked.push({ kind: "villager", id });
+          }
+        }
+      }
+      if (picked.length) {
+        this.selected = picked;
+        this.selectedBuildingPos = null;
+      }
+    } else if (this.dragStart && this.selected.length > 0) {
+      // Chỉ là 1 cú bấm vào đất trống (không kéo) trong khi đang có quân/dân được chọn → ra lệnh di chuyển
+      this.issueMoveCommand(this.dragStart.x, this.dragStart.y);
+    }
+    this.dragStart = null;
+    this.isDragging = false;
+    this.dragBoxG.clear();
+  }
+
   private issueMoveCommand(x: number, y: number) {
-    if (!this.selected) return;
+    if (!this.selected.length) return;
     const cx = Phaser.Math.Clamp(x, 15, this.preset.worldW - 15);
     const cy = Phaser.Math.Clamp(y, 15, this.preset.worldH - 15);
-    if (this.selected.kind === "unit") {
-      const u = this.localUnits.get(this.selected.id);
-      if (u) u.manualTarget = { x: cx, y: cy };
-      else this.selected = null;
-    } else {
-      this.myVillagers?.commandMove(this.selected.id, cx, cy);
-    }
+    const n = this.selected.length;
+    this.selected.forEach((s, i) => {
+      // Dàn đội hình nhẹ quanh điểm đích để quân không chồng lên nhau khi đi theo nhóm
+      const angle = (i / Math.max(1, n)) * Math.PI * 2;
+      const spread = n > 1 ? Math.min(46, 10 + n * 3) : 0;
+      const tx = Phaser.Math.Clamp(cx + Math.cos(angle) * spread, 15, this.preset.worldW - 15);
+      const ty = Phaser.Math.Clamp(cy + Math.sin(angle) * spread, 15, this.preset.worldH - 15);
+      if (s.kind === "unit") {
+        const u = this.localUnits.get(s.id);
+        if (u) u.manualTarget = { x: tx, y: ty };
+      } else {
+        this.myVillagers?.commandMove(s.id, tx, ty);
+      }
+    });
   }
 
   private drawSelectionRing() {
@@ -725,20 +877,23 @@ export default class MainScene extends Phaser.Scene {
         8
       );
     }
-    if (!this.selected) return;
-    let pos: { x: number; y: number } | null = null;
-    if (this.selected.kind === "unit") {
-      const u = this.localUnits.get(this.selected.id);
-      pos = u ? { x: u.x, y: u.y } : null;
-    } else {
-      pos = this.myVillagers?.getPos(this.selected.id) ?? null;
-    }
-    if (!pos) {
-      this.selected = null;
-      return;
-    }
+    if (!this.selected.length) return;
+    const stillAlive: { kind: "unit" | "villager"; id: string }[] = [];
     this.selectionRing.lineStyle(2, 0xffffff, 0.85);
-    this.selectionRing.strokeEllipse(pos.x, pos.y, 36, 18);
+    for (const s of this.selected) {
+      let pos: { x: number; y: number } | null = null;
+      if (s.kind === "unit") {
+        const u = this.localUnits.get(s.id);
+        pos = u ? { x: u.x, y: u.y } : null;
+      } else {
+        pos = this.myVillagers?.getPos(s.id) ?? null;
+      }
+      if (pos) {
+        stillAlive.push(s);
+        this.selectionRing.strokeEllipse(pos.x, pos.y, 36, 18);
+      }
+    }
+    this.selected = stillAlive;
   }
 
   // ── Spawn ──────────────────────────────────────────────────────────
@@ -922,20 +1077,34 @@ export default class MainScene extends Phaser.Scene {
     for (const u of this.localUnits.values()) {
       if (u.state === "dead") continue;
       const cfg = UNIT_CONFIGS[u.type];
+      const isHealer = cfg.role === "heal";
 
-      let nearestId: string | null = null;
-      let nearestDist = Infinity;
-      for (const [rid, ru] of this.remoteUnits) {
-        const d = Phaser.Math.Distance.Between(u.x, u.y, ru.sprite.x, ru.sprite.y);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestId = rid;
+      let actionTargetId: string | null = null;
+      let actionDist = Infinity;
+      if (isHealer) {
+        for (const [oid, ou] of this.localUnits) {
+          if (oid === u.id || ou.state === "dead" || ou.hp >= ou.maxHp) continue;
+          const d = Phaser.Math.Distance.Between(u.x, u.y, ou.x, ou.y);
+          if (d < actionDist) {
+            actionDist = d;
+            actionTargetId = oid;
+          }
+        }
+      } else {
+        for (const [rid, ru] of this.remoteUnits) {
+          const d = Phaser.Math.Distance.Between(u.x, u.y, ru.sprite.x, ru.sprite.y);
+          if (d < actionDist) {
+            actionDist = d;
+            actionTargetId = rid;
+          }
         }
       }
-      const distToBase = Phaser.Math.Distance.Between(u.x, u.y, enemyBaseX, this.preset.worldH / 2);
+      const distToBase = isHealer
+        ? Infinity
+        : Phaser.Math.Distance.Between(u.x, u.y, enemyBaseX, this.preset.worldH / 2);
 
-      const canHitUnit = nearestId !== null && nearestDist <= cfg.range;
-      const canHitBase = !canHitUnit && distToBase <= Math.max(cfg.range, BASE_HIT_RADIUS);
+      const canHitUnit = actionTargetId !== null && actionDist <= cfg.range;
+      const canHitBase = !isHealer && !canHitUnit && distToBase <= Math.max(cfg.range, BASE_HIT_RADIUS);
 
       if (canHitUnit || canHitBase) {
         u.state = "attack";
@@ -946,8 +1115,14 @@ export default class MainScene extends Phaser.Scene {
         if (time - u.lastAttackAt >= cfg.attackCooldownMs) {
           u.lastAttackAt = time;
           u.sprite.play(`${u.spriteKey}-attack`);
-          if (canHitUnit && nearestId) {
-            this.sync.sendHit(nearestId, cfg.damage);
+          if (isHealer && canHitUnit && actionTargetId) {
+            const target = this.localUnits.get(actionTargetId);
+            if (target) {
+              target.hp = Math.min(target.maxHp, target.hp + (cfg.healAmount ?? 10));
+              this.playHealFx(target.x, target.y);
+            }
+          } else if (canHitUnit && actionTargetId) {
+            this.sync.sendHit(actionTargetId, cfg.damage);
           } else if (canHitBase) {
             this.sync.sendHit("base", cfg.damage);
           }
@@ -1109,7 +1284,12 @@ export default class MainScene extends Phaser.Scene {
   private endGame(youWin: boolean) {
     if (this.gameOver) return;
     this.gameOver = true;
-    gameEvents.emit("game-end", { youWin });
+    if (this.mode === "endless") {
+      const timeSec = Math.floor((this.time.now - this.matchStartMs) / 1000);
+      gameEvents.emit("game-end", { youWin: false, wave: this.currentWave, timeSec });
+    } else {
+      gameEvents.emit("game-end", { youWin });
+    }
   }
 
   private handleLeave() {

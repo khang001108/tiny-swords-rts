@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { randomRoomCode } from "@/game/net";
-import { MAP_PRESETS, MapSize, RESOURCE_NODE_LAYOUT } from "@/game/entities";
+import { MAP_PRESETS, MapSize, RESOURCE_NODE_LAYOUT, sliderToMapSize } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
-type Step = "mode" | "bot-map" | "online-choice" | "online-map";
+type Step = "mode" | "bot-map" | "online-choice" | "online-map" | "endless-map";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -16,6 +16,11 @@ export default function LobbyPage() {
   const startBot = (map: MapSize) => {
     const id = Math.random().toString(36).slice(2, 8);
     router.push(`/game/bot-${id}?mode=bot&map=${map}`);
+  };
+
+  const startEndless = (map: MapSize) => {
+    const id = Math.random().toString(36).slice(2, 8);
+    router.push(`/game/endless-${id}?mode=endless&map=${map}`);
   };
 
   const createOnlineRoom = (map: MapSize) => {
@@ -29,7 +34,7 @@ export default function LobbyPage() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4">
+    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-6">
       <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-20 h-20 object-contain mb-1 drop-shadow-lg" />
       <h1 className="text-4xl font-extrabold mb-1 text-center tracking-wide" style={{ textShadow: "2px 2px 0 rgba(0,0,0,0.4)" }}>
         Tiny Swords RTS
@@ -51,10 +56,14 @@ export default function LobbyPage() {
               <BigButton color="blue" onClick={() => router.push("/ffa")}>
                 ⚔️ Đấu 1 chọi nhiều (chọn phe, vs 4 AI)
               </BigButton>
+              <BigButton color="red" onClick={() => setStep("endless-map")}>
+                🌊 Endless Mode (sóng vô tận)
+              </BigButton>
             </div>
           )}
 
           {step === "bot-map" && <MapPicker onBack={() => setStep("mode")} onPick={startBot} />}
+          {step === "endless-map" && <MapPicker onBack={() => setStep("mode")} onPick={startEndless} />}
 
           {step === "online-choice" && (
             <div className="space-y-4">
@@ -95,7 +104,8 @@ export default function LobbyPage() {
 
       {step === "mode" && (
         <p className="text-white/30 text-xs mt-6 max-w-md text-center">
-          Chơi với Bot để luyện tập một mình, hoặc tạo phòng rồi gửi mã cho bạn bè để đấu real-time.
+          Chơi với Bot để luyện tập một mình, hoặc tạo phòng rồi gửi mã cho bạn bè để đấu real-time. Endless Mode để thử
+          sức sống sót qua càng nhiều sóng địch càng tốt.
         </p>
       )}
     </main>
@@ -121,33 +131,50 @@ function BigButton({
 }
 
 function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize) => void }) {
-  const sizes: MapSize[] = ["small", "medium", "large"];
+  const [t, setT] = useState(50);
+  const size = sliderToMapSize(t);
+  const p = MAP_PRESETS[size];
   return (
-    <div className="space-y-3">
-      <p className="text-[#3a2c1a]/70 text-sm text-center mb-1 flex items-center justify-center gap-1">
+    <div className="space-y-4">
+      <p className="text-[#3a2c1a]/70 text-sm text-center flex items-center justify-center gap-1">
         <img src="/assets/ui9/icon-hammer.png" className="icon-inline" alt="" />
         Chọn kích thước bản đồ
       </p>
-      {sizes.map((s) => {
-        const p = MAP_PRESETS[s];
-        return (
-          <button
-            key={s}
-            onClick={() => onPick(s)}
-            className="w-full py-3 px-4 rounded-lg bg-black/5 hover:bg-black/10 border border-[#3a2c1a]/25 text-left transition flex items-center gap-3"
-          >
-            <MapPreviewSvg size={s} />
-            <div>
-              <div className="font-bold text-[#3a2c1a]">
-                {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
-              </div>
-              <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
-              <div className="text-[#3a2c1a]/40 text-[11px] mt-0.5">{p.buildings.length} công trình quanh căn cứ</div>
-            </div>
-          </button>
-        );
-      })}
-      <button onClick={onBack} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a]">
+
+      <div className="flex justify-center">
+        <MapPreviewSvg size={size} />
+      </div>
+
+      <div className="text-center">
+        <div className="font-bold text-[#3a2c1a]">
+          {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
+        </div>
+        <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
+      </div>
+
+      <div className="px-1">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={50}
+          value={t}
+          onChange={(e) => setT(Number(e.target.value))}
+          className="w-full accent-[#3a2c1a] cursor-pointer"
+        />
+        <div className="flex justify-between text-[11px] text-[#3a2c1a]/50 px-0.5 -mt-1">
+          <span>Nhỏ</span>
+          <span>Vừa</span>
+          <span>Lớn</span>
+        </div>
+      </div>
+
+      <button onClick={() => onPick(size)} className="w-full h-14 block">
+        <NineSlice prefix="btn-blue" className="w-full h-full">
+          <span className="font-bold text-white">Bắt đầu</span>
+        </NineSlice>
+      </button>
+      <button onClick={onBack} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a] block mx-auto">
         ← Quay lại
       </button>
     </div>
@@ -157,31 +184,37 @@ function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize
 /** Xem trước bố cục bản đồ thật (vị trí căn cứ + mỏ tài nguyên) trước khi vào trận */
 function MapPreviewSvg({ size }: { size: MapSize }) {
   const p = MAP_PRESETS[size];
-  const W = 96;
+  const W = 160;
   const H = Math.round((p.worldH / p.worldW) * W);
   const sx = W / p.worldW;
   const sy = H / p.worldH;
   const leftX = p.baseMargin * sx;
   const rightX = (p.worldW - p.baseMargin) * sx;
   const midY = (p.worldH / 2) * sy;
-  const forestH = Math.max(3, 18 * sy * (p.treeSpacing < 70 ? 0.8 : 1));
+  const forestH = Math.max(4, 18 * sy * (p.treeSpacing < 70 ? 0.8 : 1));
+  const riverX = p.riverX * sx;
+  const riverW = Math.max(3, p.riverWidth * sx);
 
   const resDot = (baseX: number, dir: 1 | -1, color: string, key: string) => {
     const spec = RESOURCE_NODE_LAYOUT.find((r) => r.kind === key)!;
     const x = baseX + dir * spec.offsetX * sx;
     const y = midY + spec.offsetY * sy;
-    return <circle key={key} cx={x} cy={y} r={1.6} fill={color} />;
+    return <circle key={key} cx={x} cy={y} r={2} fill={color} />;
   };
 
   return (
     <svg width={W} height={H} className="rounded shrink-0 border border-black/20" style={{ background: "#4a7a4a" }}>
       <rect x={0} y={0} width={W} height={forestH} fill="#2f5a2f" />
       <rect x={0} y={H - forestH} width={W} height={forestH} fill="#2f5a2f" />
-      <rect x={0} y={0} width={W} height={H} fill="none" />
-      {/* căn cứ */}
+      <rect x={riverX - riverW / 2} y={0} width={riverW} height={H} fill="#2b8a8a" opacity={0.85} />
+      {p.bridgeYs.map((by, i) => (
+        <rect key={i} x={riverX - riverW / 2 - 2} y={by * sy - 5} width={riverW + 4} height={10} fill="#8a5a34" />
+      ))}
+      {p.hillSpecs.map((h, i) => (
+        <circle key={i} cx={h.x * sx} cy={h.y * sy} r={7 * h.scale} fill="#7fa9a3" opacity={0.8} />
+      ))}
       <rect x={leftX - 3} y={midY - 3} width={6} height={6} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.5} />
       <rect x={rightX - 3} y={midY - 3} width={6} height={6} fill="#ef4444" stroke="#1e293b" strokeWidth={0.5} />
-      {/* mỏ tài nguyên quanh mỗi base (đối xứng) */}
       {resDot(leftX, 1, "#a3752c", "wood")}
       {resDot(leftX, 1, "#facc15", "gold")}
       {resDot(leftX, 1, "#f472b6", "meat")}
