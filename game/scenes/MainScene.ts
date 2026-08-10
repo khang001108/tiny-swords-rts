@@ -7,6 +7,7 @@ import {
   UnitSnapshot,
 } from "@/game/net";
 import { BotOpponent } from "@/game/opponent";
+import { NavGrid, buildNavGrid, findPath } from "@/game/pathfinding";
 import {
   BASE_MAX_HP,
   BUILDING_VISUALS,
@@ -29,6 +30,7 @@ import {
   PORTRAIT_H,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
+  RESOURCE_LABEL,
   STARTING_GOLD,
   TOWER_COOLDOWN_MS,
   TOWER_DAMAGE,
@@ -62,6 +64,9 @@ interface LocalUnit {
   lastAnimState: "walk" | "attack";
   lastAttackAt: number;
   manualTarget: { x: number; y: number } | null;
+  path: { x: number; y: number }[] | null;
+  pathIndex: number;
+  pathTargetKey: string;
 }
 
 interface RemoteUnit {
@@ -99,7 +104,7 @@ export default class MainScene extends Phaser.Scene {
   private myNodePosSaved: NodePositions | null = null;
   private housesBuilt = 0;
   private resourceHouses: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
-  private buildMode: "house" | null = null;
+  private buildMode: { type: "house" } | { type: "resource"; kind: ResourceKind } | null = null;
   private ghostSprite: Phaser.GameObjects.Image | null = null;
   private myBuildingPositions: { x: number; y: number }[] = [];
   private paused = false;
@@ -133,6 +138,7 @@ export default class MainScene extends Phaser.Scene {
   private riverBand: { xMin: number; xMax: number } | null = null;
   private bridges: { y: number }[] = [];
   private hillObstacles: { x: number; y: number; r: number }[] = [];
+  private navGrid: NavGrid | null = null;
 
   private localUnits = new Map<string, LocalUnit>();
   private remoteUnits = new Map<string, RemoteUnit>();
@@ -330,14 +336,29 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private async connectRoom() {
+    // Bot/Endless: luôn biết trước người chơi ở "left" — dựng base + lưới pathfinding
+    // TRƯỚC khi tạo BotOpponent để AI có ngay bản đồ né vật cản đầy đủ (kể cả công trình của mình).
+    const isBotLike = this.mode === "bot" || this.mode === "endless";
+    if (isBotLike) {
+      this.mySide = "left";
+      this.layoutBases();
+      this.buildNavigation();
+    }
+
     this.sync =
       this.mode === "bot"
-        ? new BotOpponent(this.preset)
+        ? new BotOpponent(this.preset, "normal", false, undefined, this.navGrid)
         : this.mode === "endless"
-        ? new BotOpponent(this.preset, "normal", true, (wave) => {
-            this.currentWave = wave;
-            gameEvents.emit("endless-wave", { wave });
-          })
+        ? new BotOpponent(
+            this.preset,
+            "normal",
+            true,
+            (wave) => {
+              this.currentWave = wave;
+              gameEvents.emit("endless-wave", { wave });
+            },
+            this.navGrid
+          )
         : new RoomSync(this.roomCode, this.isHost);
 
     this.sync.on({
@@ -357,9 +378,27 @@ export default class MainScene extends Phaser.Scene {
     this.mySide = side;
     this.opponentConnected = this.mode !== "online" ? true : this.opponentConnected;
     this.matchStartMs = this.time.now;
-    this.layoutBases();
+    if (!isBotLike) {
+      this.layoutBases();
+      this.buildNavigation();
+    }
     this.setupCamera();
     this.emitHud();
+  }
+
+  /** Dựng lưới pathfinding 1 lần khi vào trận — né sông (trừ đúng chỗ có cầu), đồi và công trình của mình */
+  private buildNavigation() {
+    const obstacles = this.hillObstacles.map((h) => ({ x: h.x, y: h.y, r: h.r }));
+    for (const p of this.myBuildingPositions) obstacles.push({ x: p.x, y: p.y, r: 42 });
+    const river = this.riverBand
+      ? {
+          xMin: this.riverBand.xMin,
+          xMax: this.riverBand.xMax,
+          bridgeYs: this.bridges.map((b) => b.y),
+          bridgeHalfHeight: this.preset.bridgeHeight,
+        }
+      : null;
+    this.navGrid = buildNavGrid(this.preset.worldW, this.preset.worldH, 28, obstacles, river);
   }
 
   /**
@@ -618,13 +657,11 @@ export default class MainScene extends Phaser.Scene {
     for (let x = -10; x < worldW + 40; x += treeSpacing) {
       const key = treeKeys[i % treeKeys.length];
       const jitter = i % 2 === 0 ? -6 : 6;
+      // Cả 2 hàng cây (trên/dưới) đều đứng thẳng bình thường — origin neo ở gốc cây (0.5, 0.85)
+      // để cây "đứng" đúng trên mặt đất. KHÔNG dùng setFlipY ở đây: lật dọc làm cây bị ngược
+      // (ngọn chúc xuống, gốc chổng lên) — đó chính là lỗi đã gặp trước đây.
       this.add.image(x, topY + jitter, key).setScale(0.42).setDepth(3).setOrigin(0.5, 0.85);
-      this.add
-        .image(x + treeSpacing / 2, bottomY + jitter, key)
-        .setScale(0.42)
-        .setDepth(3)
-        .setFlipY(true)
-        .setOrigin(0.5, 0.15);
+      this.add.image(x + treeSpacing / 2, bottomY + jitter, key).setScale(0.42).setDepth(3).setOrigin(0.5, 0.85);
       i++;
     }
 
@@ -715,67 +752,40 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  private needsRiverCrossing(fromX: number, toX: number): boolean {
-    if (!this.riverBand) return false;
-    const { xMin, xMax } = this.riverBand;
-    return (fromX <= xMin && toX >= xMin) || (fromX >= xMax && toX <= xMax);
-  }
-
-  private nearestBridgeY(y: number): number {
-    if (!this.bridges.length) return y;
-    let best = this.bridges[0].y;
-    let bestD = Infinity;
-    for (const b of this.bridges) {
-      const dd = Math.abs(b.y - y);
-      if (dd < bestD) {
-        bestD = dd;
-        best = b.y;
-      }
-    }
-    return best;
-  }
-
-  private applyHillAvoidance(x: number, y: number, tx: number, ty: number): { x: number; y: number } {
-    const toTargetX = tx - x;
-    const toTargetY = ty - y;
-    const targetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY) || 1;
-    const dirX = toTargetX / targetDist;
-    const dirY = toTargetY / targetDist;
-    for (const h of this.hillObstacles) {
-      const toHillX = h.x - x;
-      const toHillY = h.y - y;
-      const proj = Phaser.Math.Clamp(toHillX * dirX + toHillY * dirY, 0, targetDist);
-      const closestX = x + dirX * proj;
-      const closestY = y + dirY * proj;
-      const distToHill = Phaser.Math.Distance.Between(h.x, h.y, closestX, closestY);
-      if (distToHill < h.r + 16) {
-        const perpX = -dirY;
-        const perpY = dirX;
-        const side = (h.x - x) * perpX + (h.y - y) * perpY < 0 ? 1 : -1;
-        const pushDist = h.r + 22 - distToHill;
-        return { x: closestX + perpX * side * pushDist, y: closestY + perpY * side * pushDist };
-      }
-    }
-    return { x: tx, y: ty };
-  }
-
-  /** Tính điểm đích tạm thời (waypoint) cho 1 bước di chuyển — tự né sông (đi qua cầu gần nhất) và né đồi */
-  private computeWaypoint(x: number, y: number, targetX: number, targetY: number): { x: number; y: number } {
-    let wp = { x: targetX, y: targetY };
-    if (this.needsRiverCrossing(x, targetX)) {
-      const by = this.nearestBridgeY(y);
-      const bandCenterX = this.riverBand ? (this.riverBand.xMin + this.riverBand.xMax) / 2 : targetX;
-      if (Math.abs(y - by) > 12) {
-        const edgeX = x < bandCenterX ? Math.min(x, this.riverBand!.xMin - 6) : Math.max(x, this.riverBand!.xMax + 6);
-        wp = { x: edgeX, y: by };
-      } else {
-        wp = { x: targetX, y: by };
-      }
-    }
-    return this.applyHillAvoidance(x, y, wp.x, wp.y);
-  }
-
   // ── Điều khiển thủ công: chọn quân/dân rồi bấm để ra lệnh (hỗ trợ kéo-chọn nhiều) ──
+  /** Di chuyển 1 quân theo đường đi A* thật tới (targetX,targetY) — chỉ tính lại đường khi đích đổi (>20px) */
+  private followPath(u: LocalUnit, targetX: number, targetY: number, speed: number, dt: number, isManual: boolean) {
+    const targetKey = `${Math.round(targetX / 10)},${Math.round(targetY / 10)}`;
+    if (!u.path || u.pathTargetKey !== targetKey) {
+      u.path = this.navGrid ? findPath(this.navGrid, u.x, u.y, targetX, targetY) : [{ x: targetX, y: targetY }];
+      u.pathIndex = 0;
+      u.pathTargetKey = targetKey;
+    }
+    const path = u.path;
+    if (!path || !path.length) return;
+    if (u.pathIndex >= path.length) u.pathIndex = path.length - 1;
+    const wp = path[u.pathIndex];
+    const dx = wp.x - u.x;
+    const dy = wp.y - u.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const step = speed * dt;
+
+    if (d <= Math.max(step, 6)) {
+      u.x = wp.x;
+      u.y = wp.y;
+      if (u.pathIndex >= path.length - 1) {
+        if (isManual) u.manualTarget = null;
+        u.path = null;
+      } else {
+        u.pathIndex++;
+      }
+    } else {
+      u.x += (dx / d) * step;
+      u.y += (dy / d) * step;
+      u.sprite.setFlipX(dx < 0);
+    }
+  }
+
   private handlePinchZoom() {
     const p1 = this.input.pointer1;
     const p2 = this.input.pointer2;
@@ -799,6 +809,13 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
+  // ── Input: TAP vs DRAG luôn phân biệt bằng ngưỡng di chuyển — không xử lý gì trên
+  // pointerdown ngoài build-mode/minimap/pinch; MỌI lựa chọn (unit/villager/building/enemy)
+  // chỉ thực thi ở pointerup, và CHỈ khi tổng quãng đường di chuyển chưa vượt ngưỡng (10px).
+  // Nhờ vậy: chạm vào Castle rồi vuốt để kéo camera sẽ KHÔNG mở Build Menu.
+  private readonly TAP_THRESHOLD = 10;
+  private pendingHit: Phaser.GameObjects.GameObject | null = null;
+
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
     if (this.buildMode) {
@@ -807,21 +824,106 @@ export default class MainScene extends Phaser.Scene {
     }
     if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch, bỏ qua tap thường
 
-    // Bấm vào minimap (luôn cố định trên màn hình) → camera nhảy tới đúng vị trí đó trên bản đồ lớn
+    // Bấm vào minimap (luôn cố định trên màn hình) → xử lý ngay, không phải world object nên không xung đột kéo camera
     if (this.pointInMinimap(pointer.x, pointer.y)) {
       this.jumpCameraFromMinimap(pointer.x, pointer.y);
       return;
     }
 
+    // CHỈ ghi nhận — chưa quyết định gì. Quyết định TAP hay DRAG diễn ra ở pointerup/pointermove.
     const hits = this.input.hitTestPointer(pointer) as Phaser.GameObjects.GameObject[];
-    const hit = hits[0];
+    this.pendingHit = hits[0] ?? null;
+    this.dragStart = { x: pointer.worldX, y: pointer.worldY };
+    this.dragStartScreen = { x: pointer.x, y: pointer.y };
+    this.isDragging = false;
+    this.isPanning = false;
+  }
 
-    if (!hit && this.selected.length === 0 && this.selectedBuildingPos) {
-      // Bấm ra vùng trống khi đang chọn 1 công trình → bỏ chọn, đóng build menu
-      this.selectedBuildingPos = null;
-      gameEvents.emit("deselect-building");
+  private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (this.buildMode && this.ghostSprite) {
+      this.ghostSprite.setPosition(pointer.worldX, pointer.worldY);
+      const valid = this.isValidBuildSpot(pointer.worldX, pointer.worldY);
+      this.ghostSprite.setTint(valid ? 0xffffff : 0xff8888);
+      return;
+    }
+    if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch bằng 2 ngón — camera do handlePinchZoom lo
+    if (!this.dragStart || !pointer.isDown) return;
+    const isTouch = pointer.wasTouch;
+
+    if (isTouch) {
+      const dxScreen = pointer.x - (this.dragStartScreen?.x ?? pointer.x);
+      const dyScreen = pointer.y - (this.dragStartScreen?.y ?? pointer.y);
+      if (!this.isPanning && Math.hypot(dxScreen, dyScreen) > this.TAP_THRESHOLD) {
+        this.isPanning = true; // vượt ngưỡng → chắc chắn là kéo camera, huỷ hẳn "tap đang chờ"
+        this.pendingHit = null;
+      }
+      if (this.isPanning) {
+        const cam = this.cameras.main;
+        cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
+        cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+      }
+      return;
     }
 
+    const dx = pointer.worldX - this.dragStart.x;
+    const dy = pointer.worldY - this.dragStart.y;
+    if (!this.isDragging && Math.hypot(dx, dy) > this.TAP_THRESHOLD) {
+      this.isDragging = true;
+      this.pendingHit = null; // vượt ngưỡng → là kéo-chọn-vùng, không phải tap
+    }
+    if (this.isDragging) {
+      this.dragBoxG.clear();
+      this.dragBoxG.lineStyle(1.5, 0x8ef58e, 0.9);
+      this.dragBoxG.fillStyle(0x8ef58e, 0.12);
+      const x = Math.min(this.dragStart.x, pointer.worldX);
+      const y = Math.min(this.dragStart.y, pointer.worldY);
+      const w = Math.abs(dx);
+      const h = Math.abs(dy);
+      this.dragBoxG.fillRect(x, y, w, h);
+      this.dragBoxG.strokeRect(x, y, w, h);
+    }
+  }
+
+  private handlePointerUp(pointer: Phaser.Input.Pointer) {
+    if (this.gameOver || this.paused || this.buildMode) {
+      this.resetPointerState();
+      return;
+    }
+
+    if (this.isPanning) {
+      // vừa cuộn camera xong — chắc chắn không phải tap, không chọn/ra lệnh gì cả
+    } else if (this.isDragging && this.dragStart) {
+      // Kéo-chọn-vùng (chuột) — đã xác nhận không phải tap lên 1 object cụ thể
+      const x1 = Math.min(this.dragStart.x, pointer.worldX);
+      const x2 = Math.max(this.dragStart.x, pointer.worldX);
+      const y1 = Math.min(this.dragStart.y, pointer.worldY);
+      const y2 = Math.max(this.dragStart.y, pointer.worldY);
+      const picked: { kind: "unit" | "villager"; id: string }[] = [];
+      for (const u of this.localUnits.values()) {
+        if (u.state === "dead") continue;
+        if (u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2) picked.push({ kind: "unit", id: u.id });
+      }
+      if (this.myVillagers) {
+        for (const v of this.myVillagers.sprites) {
+          if (v.x >= x1 && v.x <= x2 && v.y >= y1 && v.y <= y2) {
+            const id = v.getData("villagerId");
+            if (id) picked.push({ kind: "villager", id });
+          }
+        }
+      }
+      if (picked.length) {
+        this.selected = picked;
+        this.selectedBuildingPos = null;
+      }
+    } else {
+      // TAP thật sự (chưa từng vượt ngưỡng di chuyển) — giờ mới xử lý object đã ghi nhận lúc pointerdown
+      this.resolveTap();
+    }
+    this.resetPointerState();
+  }
+
+  private resolveTap() {
+    const hit = this.pendingHit;
     if (hit) {
       const kind = hit.getData("kind");
       if (kind === "my-unit") {
@@ -857,92 +959,19 @@ export default class MainScene extends Phaser.Scene {
         gameEvents.emit("select-building", { role: hit.getData("role") });
         return;
       }
-    }
-
-    // Không trúng gì cụ thể:
-    // - Chạm tay (điện thoại) → kéo để cuộn camera xem chỗ khác của bản đồ
-    // - Chuột (máy tính) → kéo để chọn nhiều quân trong 1 vùng
-    this.dragStart = { x: pointer.worldX, y: pointer.worldY };
-    this.dragStartScreen = { x: pointer.x, y: pointer.y };
-    this.isDragging = false;
-    this.isPanning = false;
-  }
-
-  private handlePointerMove(pointer: Phaser.Input.Pointer) {
-    if (this.buildMode && this.ghostSprite) {
-      this.ghostSprite.setPosition(pointer.worldX, pointer.worldY);
-      const valid = this.isValidBuildSpot(pointer.worldX, pointer.worldY);
-      this.ghostSprite.setTint(valid ? 0xffffff : 0xff8888);
       return;
     }
-    if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch bằng 2 ngón — camera do handlePinchZoom lo
-    if (!this.dragStart || !pointer.isDown) return;
-    const isTouch = pointer.wasTouch;
-
-    if (isTouch) {
-      const dxScreen = pointer.x - (this.dragStartScreen?.x ?? pointer.x);
-      const dyScreen = pointer.y - (this.dragStartScreen?.y ?? pointer.y);
-      if (!this.isPanning && Math.hypot(dxScreen, dyScreen) > 6) this.isPanning = true;
-      if (this.isPanning) {
-        const cam = this.cameras.main;
-        cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
-        cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
-      }
-      return;
-    }
-
-    const dx = pointer.worldX - this.dragStart.x;
-    const dy = pointer.worldY - this.dragStart.y;
-    if (!this.isDragging && Math.hypot(dx, dy) > 8) this.isDragging = true;
-    if (this.isDragging) {
-      this.dragBoxG.clear();
-      this.dragBoxG.lineStyle(1.5, 0x8ef58e, 0.9);
-      this.dragBoxG.fillStyle(0x8ef58e, 0.12);
-      const x = Math.min(this.dragStart.x, pointer.worldX);
-      const y = Math.min(this.dragStart.y, pointer.worldY);
-      const w = Math.abs(dx);
-      const h = Math.abs(dy);
-      this.dragBoxG.fillRect(x, y, w, h);
-      this.dragBoxG.strokeRect(x, y, w, h);
-    }
-  }
-
-  private handlePointerUp(pointer: Phaser.Input.Pointer) {
-    if (this.gameOver || this.paused) {
-      this.dragStart = null;
-      this.isDragging = false;
-      this.isPanning = false;
-      this.dragBoxG.clear();
-      return;
-    }
-    if (this.isPanning) {
-      // vừa cuộn camera xong — không coi đây là 1 cú bấm chọn/ra lệnh
-    } else if (this.isDragging && this.dragStart) {
-      const x1 = Math.min(this.dragStart.x, pointer.worldX);
-      const x2 = Math.max(this.dragStart.x, pointer.worldX);
-      const y1 = Math.min(this.dragStart.y, pointer.worldY);
-      const y2 = Math.max(this.dragStart.y, pointer.worldY);
-      const picked: { kind: "unit" | "villager"; id: string }[] = [];
-      for (const u of this.localUnits.values()) {
-        if (u.state === "dead") continue;
-        if (u.x >= x1 && u.x <= x2 && u.y >= y1 && u.y <= y2) picked.push({ kind: "unit", id: u.id });
-      }
-      if (this.myVillagers) {
-        for (const v of this.myVillagers.sprites) {
-          if (v.x >= x1 && v.x <= x2 && v.y >= y1 && v.y <= y2) {
-            const id = v.getData("villagerId");
-            if (id) picked.push({ kind: "villager", id });
-          }
-        }
-      }
-      if (picked.length) {
-        this.selected = picked;
-        this.selectedBuildingPos = null;
-      }
-    } else if (this.dragStart && this.selected.length > 0) {
-      // Chỉ là 1 cú bấm vào đất trống (không kéo) trong khi đang có quân/dân được chọn → ra lệnh di chuyển
+    // Tap vào chỗ trống
+    if (this.selected.length > 0 && this.dragStart) {
       this.issueMoveCommand(this.dragStart.x, this.dragStart.y);
+    } else if (this.selectedBuildingPos) {
+      this.selectedBuildingPos = null;
+      gameEvents.emit("deselect-building");
     }
+  }
+
+  private resetPointerState() {
+    this.pendingHit = null;
     this.dragStart = null;
     this.dragStartScreen = null;
     this.isDragging = false;
@@ -1032,7 +1061,7 @@ export default class MainScene extends Phaser.Scene {
   private handleBuildHouse() {
     if (this.gameOver || this.housesBuilt >= HOUSE_MAX_COUNT || this.buildMode) return;
     if (this.gold < HOUSE_COST) return;
-    this.buildMode = "house";
+    this.buildMode = { type: "house" };
     const color = this.mySide === "left" ? "blue" : "red";
     this.ghostSprite = this.add
       .image(this.myBasePos.x, this.myBasePos.y, `bld_house1_${color}`)
@@ -1043,13 +1072,18 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private isValidBuildSpot(x: number, y: number): boolean {
+    if (!this.buildMode) return false;
     if (this.riverBand && x > this.riverBand.xMin - 24 && x < this.riverBand.xMax + 24) return false;
-    const distBase = Phaser.Math.Distance.Between(x, y, this.myBasePos.x, this.myBasePos.y);
-    if (distBase > 280) return false;
     for (const p of this.myBuildingPositions) {
-      if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 55) return false;
+      if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 50) return false;
     }
-    return true;
+    if (this.buildMode.type === "house") {
+      const distBase = Phaser.Math.Distance.Between(x, y, this.myBasePos.x, this.myBasePos.y);
+      return distBase <= 280;
+    }
+    const node = this.myNodePosSaved?.[this.buildMode.kind];
+    if (!node) return false;
+    return Phaser.Math.Distance.Between(x, y, node.x, node.y) <= 95;
   }
 
   private confirmBuildPlacement(x: number, y: number) {
@@ -1061,16 +1095,27 @@ export default class MainScene extends Phaser.Scene {
       }
       return; // vị trí không hợp lệ — giữ nguyên build mode để thử lại
     }
-    this.gold -= HOUSE_COST;
     const color = this.mySide === "left" ? "blue" : "red";
     const img = this.add.image(x, y, `bld_house1_${color}`).setScale(0).setDepth(4);
     img.setInteractive({ cursor: "pointer" });
     img.setData("kind", "my-building");
-    img.setData("role", "house1");
-    this.tweens.add({ targets: img, scale: 0.4, duration: 240, ease: "Back.Out" });
     this.myBuildingPositions.push({ x, y });
-    this.housesBuilt++;
-    this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
+
+    if (this.buildMode.type === "house") {
+      this.gold -= HOUSE_COST;
+      img.setData("role", "house1");
+      this.tweens.add({ targets: img, scale: 0.4, duration: 240, ease: "Back.Out" });
+      this.housesBuilt++;
+      this.myVillagers?.increaseMax(HOUSE_VILLAGER_BONUS);
+    } else {
+      const kind = this.buildMode.kind;
+      this.gold -= RESOURCE_HOUSE_COST;
+      this.resourceHouses[kind] = true;
+      img.setData("role", `resource-${kind}`);
+      this.tweens.add({ targets: img, scale: 0.32, duration: 240, ease: "Back.Out" });
+      this.myVillagers?.increaseMax(1);
+      this.myVillagers?.addVillager(kind); // dân miễn phí, đi thẳng vào đúng mỏ này
+    }
     this.recomputePopCap();
     this.cancelBuildMode();
     this.emitHud();
@@ -1084,21 +1129,17 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private handleBuildResourceHouse(kind: ResourceKind) {
-    if (this.gameOver || this.resourceHouses[kind] || !this.myNodePosSaved) return;
+    if (this.gameOver || this.resourceHouses[kind] || !this.myNodePosSaved || this.buildMode) return;
     if (this.gold < RESOURCE_HOUSE_COST) return;
-    this.gold -= RESOURCE_HOUSE_COST;
-    this.resourceHouses[kind] = true;
-
+    this.buildMode = { type: "resource", kind };
     const node = this.myNodePosSaved[kind];
     const color = this.mySide === "left" ? "blue" : "red";
-    const img = this.add.image(node.x + 26, node.y - 22, `bld_house1_${color}`).setScale(0).setDepth(4);
-    this.tweens.add({ targets: img, scale: 0.3, duration: 240, ease: "Back.Out" });
-    this.myBuildingPositions.push({ x: node.x + 26, y: node.y - 22 });
-
-    this.myVillagers?.increaseMax(1);
-    this.myVillagers?.addVillager(kind); // dân miễn phí, đi thẳng vào đúng mỏ này
-    this.recomputePopCap();
-    this.emitHud();
+    this.ghostSprite = this.add
+      .image(node.x, node.y - 30, `bld_house1_${color}`)
+      .setScale(0.32)
+      .setAlpha(0.6)
+      .setDepth(50);
+    gameEvents.emit("build-mode-start", { label: `Nhà cạnh mỏ ${RESOURCE_LABEL[kind]}` });
   }
 
   private handleSpawnRequest(type: UnitType) {
@@ -1137,6 +1178,9 @@ export default class MainScene extends Phaser.Scene {
       lastAnimState: "walk",
       lastAttackAt: 0,
       manualTarget: null,
+      path: null,
+      pathIndex: 0,
+      pathTargetKey: "",
     });
   }
 
@@ -1294,21 +1338,8 @@ export default class MainScene extends Phaser.Scene {
           u.sprite.play(`${u.spriteKey}-walk`, true);
         }
         const finalX = u.manualTarget ? u.manualTarget.x : enemyBaseX;
-        const finalY = u.manualTarget ? u.manualTarget.y : u.y;
-        const wp = this.computeWaypoint(u.x, u.y, finalX, finalY);
-        const dx = wp.x - u.x;
-        const dy = wp.y - u.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const step = cfg.speed * dt;
-        if (u.manualTarget && d <= step && Math.abs(wp.x - finalX) < 1 && Math.abs(wp.y - finalY) < 1) {
-          u.x = finalX;
-          u.y = finalY;
-          u.manualTarget = null;
-        } else {
-          u.x += (dx / d) * Math.min(step, d);
-          u.y += (dy / d) * Math.min(step, d);
-          u.sprite.setFlipX(dx < 0);
-        }
+        const finalY = u.manualTarget ? u.manualTarget.y : this.preset.worldH / 2;
+        this.followPath(u, finalX, finalY, cfg.speed, dt, !!u.manualTarget);
         u.x = Phaser.Math.Clamp(u.x, this.preset.baseMargin - 40, this.preset.worldW - this.preset.baseMargin + 40);
         u.y = Phaser.Math.Clamp(u.y, 20, this.preset.worldH - 20);
       }
@@ -1361,11 +1392,11 @@ export default class MainScene extends Phaser.Scene {
   // Vị trí + kích thước minimap tính theo màn hình (không phải theo bản đồ) vì minimap cố định trên camera
   // Đặt góc dưới-trái theo đúng chuẩn bố cục RTS mobile (không đụng nút Settings ở trên-phải)
   private minimapRect() {
-    const mmW = 130;
-    const mmH = 90;
-    const pad = 10;
+    const mmW = 120;
+    const mmH = 82;
+    const pad = 22; // đệm rộng để tránh hẳn vùng bo góc container + safe-area (notch/gesture bar)
     const mmX = pad;
-    const mmY = PORTRAIT_H - mmH - pad - 34; // chừa chút chỗ cho gợi ý dưới đáy màn hình
+    const mmY = PORTRAIT_H - mmH - pad - 30;
     return { mmX, mmY, mmW, mmH };
   }
 

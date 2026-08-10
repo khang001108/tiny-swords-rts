@@ -1,4 +1,5 @@
 import { GameOverPayload, HitPayload, OpponentLink, Side, StatePayload, UnitSnapshot } from "@/game/net";
+import { NavGrid, findPath } from "@/game/pathfinding";
 import {
   BASE_MAX_HP,
   BASE_POP_CAP,
@@ -17,6 +18,9 @@ import {
   UnitType,
 } from "@/game/entities";
 
+/** State machine đơn giản cho mỗi lính bot — thay cho kiểu "đi thẳng tới target" cũ */
+type BotUnitState = "search" | "move" | "attack" | "dead";
+
 interface BotUnit {
   id: string;
   type: UnitType;
@@ -24,8 +28,12 @@ interface BotUnit {
   y: number;
   hp: number;
   maxHp: number;
-  state: "walk" | "attack" | "dead";
+  state: BotUnitState;
   lastAttackAt: number;
+  targetId: string | null; // "base" hoặc id quân người chơi đang nhắm tới
+  path: { x: number; y: number }[] | null;
+  pathIndex: number;
+  pathTargetKey: string;
 }
 
 type Handlers = {
@@ -36,10 +44,19 @@ type Handlers = {
   onOpponentLeft?: () => void;
 };
 
+/** Độ ưu tiên chọn mục tiêu — số càng cao càng được ưu tiên tấn công trước */
+const TARGET_PRIORITY = {
+  enemyUnit: 100,
+  enemyBase: 50,
+};
+
 /**
  * AI chơi 1 mình phía "right". Không dùng mạng — mọi tương tác đi qua đúng
  * các callback mà MainScene đã có sẵn cho chế độ online (onState/onHit/onGameOver),
  * nên MainScene không cần biết đang đấu với người hay máy.
+ *
+ * State machine mỗi lính: SEARCH (tìm mục tiêu) → MOVE (đi theo đường A* thật, né
+ * sông/đồi/công trình) → ATTACK (trong tầm đánh) → quay lại SEARCH khi mục tiêu chết/mất dấu.
  */
 export class BotOpponent implements OpponentLink {
   readonly playerId = "bot-" + Math.random().toString(36).slice(2, 8);
@@ -70,15 +87,13 @@ export class BotOpponent implements OpponentLink {
   private readonly laneYMin: number;
   private readonly laneYMax: number;
   private readonly popCap: number;
-  private readonly riverXMin: number;
-  private readonly riverXMax: number;
-  private readonly bridgeYs: number[];
 
   constructor(
     private preset: MapPreset,
     private difficulty: "easy" | "normal" | "hard" = "normal",
     private endless = false,
-    private onWaveChange?: (wave: number) => void
+    private onWaveChange?: (wave: number) => void,
+    private navGrid: NavGrid | null = null
   ) {
     this.leftBaseX = preset.baseMargin;
     this.rightBaseX = preset.worldW - preset.baseMargin;
@@ -86,9 +101,6 @@ export class BotOpponent implements OpponentLink {
     this.laneYMin = preset.laneYMin;
     this.laneYMax = preset.laneYMax;
     this.popCap = endless ? 40 : BASE_POP_CAP + preset.buildings.length * POP_CAP_PER_BUILDING;
-    this.riverXMin = preset.riverX - preset.riverWidth / 2;
-    this.riverXMax = preset.riverX + preset.riverWidth / 2;
-    this.bridgeYs = preset.bridgeYs;
     this.curSpawnMs = this.difficulty === "hard" ? 1100 : this.difficulty === "easy" ? 2200 : 1600;
   }
 
@@ -192,40 +204,64 @@ export class BotOpponent implements OpponentLink {
       y: this.laneYMin + Math.random() * (this.laneYMax - this.laneYMin),
       hp: Math.round(cfg.hp * this.statMult),
       maxHp: Math.round(cfg.hp * this.statMult),
-      state: "walk",
+      state: "search",
       lastAttackAt: 0,
+      targetId: null,
+      path: null,
+      pathIndex: 0,
+      pathTargetKey: "",
     });
   }
 
-  private needsRiverCrossing(fromX: number, toX: number): boolean {
-    return (fromX <= this.riverXMin && toX >= this.riverXMin) || (fromX >= this.riverXMax && toX <= this.riverXMax);
-  }
-
-  private nearestBridgeY(y: number): number {
-    if (!this.bridgeYs.length) return y;
-    let best = this.bridgeYs[0];
-    let bestD = Infinity;
-    for (const by of this.bridgeYs) {
-      const dd = Math.abs(by - y);
-      if (dd < bestD) {
-        bestD = dd;
-        best = by;
+  /** SEARCH_TARGET — quét toàn bộ quân + căn cứ người chơi, chọn theo độ ưu tiên (quân gần nhất > căn cứ) */
+  private selectTarget(u: BotUnit): { id: string; x: number; y: number; priority: number } | null {
+    let best: { id: string; x: number; y: number; priority: number } | null = null;
+    let bestScore = -Infinity;
+    for (const hu of this.humanUnits) {
+      if (hu.hp <= 0) continue;
+      const d = Math.hypot(hu.x - u.x, hu.y - u.y);
+      const score = TARGET_PRIORITY.enemyUnit - d * 0.05;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { id: hu.id, x: hu.x, y: hu.y, priority: TARGET_PRIORITY.enemyUnit };
       }
+    }
+    const dBase = Math.hypot(this.leftBaseX - u.x, this.midY - u.y);
+    const baseScore = TARGET_PRIORITY.enemyBase - dBase * 0.05;
+    if (baseScore > bestScore) {
+      best = { id: "base", x: this.leftBaseX, y: this.midY, priority: TARGET_PRIORITY.enemyBase };
     }
     return best;
   }
 
-  /** Waypoint kế tiếp — tự động lái quân qua đúng cây cầu gần nhất khi cần băng sông (không né đồi để giữ AI đơn giản) */
-  private waypoint(x: number, y: number, targetX: number, targetY: number): { x: number; y: number } {
-    if (this.needsRiverCrossing(x, targetX)) {
-      const by = this.nearestBridgeY(y);
-      if (Math.abs(y - by) > 12) {
-        const edgeX = x < this.preset.riverX ? Math.min(x, this.riverXMin - 6) : Math.max(x, this.riverXMax + 6);
-        return { x: edgeX, y: by };
-      }
-      return { x: targetX, y: by };
+  private followPath(u: BotUnit, targetX: number, targetY: number, speed: number, dt: number): boolean {
+    const targetKey = `${Math.round(targetX / 10)},${Math.round(targetY / 10)}`;
+    if (!u.path || u.pathTargetKey !== targetKey) {
+      u.path = this.navGrid ? findPath(this.navGrid, u.x, u.y, targetX, targetY) : [{ x: targetX, y: targetY }];
+      u.pathIndex = 0;
+      u.pathTargetKey = targetKey;
     }
-    return { x: targetX, y: targetY };
+    const path = u.path;
+    if (!path || !path.length) return false;
+    if (u.pathIndex >= path.length) u.pathIndex = path.length - 1;
+    const wp = path[u.pathIndex];
+    const dx = wp.x - u.x;
+    const dy = wp.y - u.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const step = speed * dt;
+    if (d <= Math.max(step, 6)) {
+      u.x = wp.x;
+      u.y = wp.y;
+      if (u.pathIndex >= path.length - 1) {
+        u.path = null;
+        return true; // đã tới đích cuối
+      }
+      u.pathIndex++;
+    } else {
+      u.x += (dx / d) * step;
+      u.y += (dy / d) * step;
+    }
+    return false;
   }
 
   private tick() {
@@ -236,42 +272,32 @@ export class BotOpponent implements OpponentLink {
 
     for (const u of this.units.values()) {
       const cfg = UNIT_CONFIGS[u.type];
-      let nearest: UnitSnapshot | null = null;
-      let nearestDist = Infinity;
-      for (const hu of this.humanUnits) {
-        if (hu.hp <= 0) continue;
-        const d = Math.hypot(hu.x - u.x, hu.y - u.y);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearest = hu;
-        }
-      }
-      const distToBase = Math.hypot(this.leftBaseX - u.x, this.midY - u.y);
-      const canHitUnit = !!nearest && nearestDist <= cfg.range;
-      const canHitBase = !canHitUnit && distToBase <= Math.max(cfg.range, 70);
 
-      if (canHitUnit || canHitBase) {
+      // SEARCH_TARGET — luôn quét lại mỗi tick để bắt kịp khi mục tiêu cũ đã chết/di chuyển
+      const target = this.selectTarget(u);
+      u.targetId = target?.id ?? null;
+
+      const distToTarget = target ? Math.hypot(target.x - u.x, target.y - u.y) : Infinity;
+      const attackRange = target?.id === "base" ? Math.max(cfg.range, 70) : cfg.range;
+      const inRange = !!target && distToTarget <= attackRange;
+
+      if (inRange && target) {
+        // IN_ATTACK_RANGE → ATTACK
         u.state = "attack";
+        u.path = null;
         if (now - u.lastAttackAt >= cfg.attackCooldownMs) {
           u.lastAttackAt = now;
           const dmg = Math.round(cfg.damage * this.statMult);
-          if (canHitUnit && nearest) {
-            this.handlers.onHit?.({ from: this.playerId, targetId: nearest.id, damage: dmg });
-          } else {
-            this.handlers.onHit?.({ from: this.playerId, targetId: "base", damage: dmg });
-          }
+          this.handlers.onHit?.({ from: this.playerId, targetId: target.id, damage: dmg });
         }
-      } else {
-        u.state = "walk";
-        const wp = this.waypoint(u.x, u.y, this.leftBaseX, u.y);
-        const dx = wp.x - u.x;
-        const dy = wp.y - u.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const step = cfg.speed * dt;
-        u.x += (dx / d) * Math.min(step, d);
-        u.y += (dy / d) * Math.min(step, d);
+      } else if (target) {
+        // FIND_PATH + MOVE — đi theo đường A* thật, né sông/đồi/công trình thay vì lao thẳng
+        u.state = "move";
+        this.followPath(u, target.x, target.y, cfg.speed, dt);
         u.x = Math.max(this.leftBaseX - 40, Math.min(this.rightBaseX + 40, u.x));
         u.y = Math.max(20, Math.min(this.preset.worldH - 20, u.y));
+      } else {
+        u.state = "search"; // không tìm thấy mục tiêu nào (hiếm khi xảy ra vì luôn có base địch)
       }
     }
 
@@ -299,7 +325,7 @@ export class BotOpponent implements OpponentLink {
       y: u.y,
       hp: u.hp,
       maxHp: u.maxHp,
-      state: u.state,
+      state: u.state === "attack" ? "attack" : "walk",
     }));
     this.handlers.onState?.({
       from: this.playerId,

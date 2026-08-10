@@ -188,10 +188,10 @@ export default class FfaScene extends Phaser.Scene {
     let i = 0;
     for (let x = -10; x < FFA_WORLD_W + 40; x += 82) {
       const key = treeKeys[i % treeKeys.length];
+      // Chỉ viền trên/dưới, cây luôn đứng thẳng đúng chiều gốc — không setAngle/setFlipY
+      // (xoay/lật sprite cây từng khiến cây bị nằm ngang/ngược, đã bỏ hẳn cách làm đó).
       this.add.image(x, 16, key).setScale(0.4).setDepth(3).setOrigin(0.5, 0.85);
-      this.add.image(x + 41, FFA_WORLD_H - 8, key).setScale(0.4).setDepth(3).setFlipY(true).setOrigin(0.5, 0.15);
-      this.add.image(16, x, key).setScale(0.36).setDepth(3).setAngle(-90).setOrigin(0.5, 0.85);
-      this.add.image(FFA_WORLD_W - 8, x, key).setScale(0.36).setDepth(3).setAngle(90).setOrigin(0.5, 0.85);
+      this.add.image(x + 41, FFA_WORLD_H - 8, key).setScale(0.4).setDepth(3).setOrigin(0.5, 0.85);
       i++;
     }
     const decoKeys = ["deco_bush", "deco_bush2", "deco_rock", "deco_mushroom"];
