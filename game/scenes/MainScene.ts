@@ -106,6 +106,7 @@ export default class MainScene extends Phaser.Scene {
   private buildMode: { type: "house" } | { type: "resource"; kind: ResourceKind } | null = null;
   private ghostSprite: Phaser.GameObjects.Image | null = null;
   private myBuildingPositions: { x: number; y: number }[] = [];
+  private enemyBuildingPositions: { x: number; y: number }[] = [];
   private woodNodeSprites: Phaser.GameObjects.Sprite[] = [];
   private goldNodeSprite: Phaser.GameObjects.Image | null = null;
   private woodNodePos: { x: number; y: number } | null = null;
@@ -405,7 +406,10 @@ export default class MainScene extends Phaser.Scene {
   /** Dựng lưới pathfinding 1 lần khi vào trận — né sông (trừ đúng chỗ có cầu), đồi và công trình của mình */
   private buildNavigation() {
     const obstacles = this.hillObstacles.map((h) => ({ x: h.x, y: h.y, r: h.r }));
+    // Né CẢ 2 phía — trước đây chỉ né công trình của mình, quân có thể đi xuyên thẳng qua
+    // lâu đài/tháp canh của địch vì navGrid không hề biết công trình địch nằm ở đâu.
     for (const p of this.myBuildingPositions) obstacles.push({ x: p.x, y: p.y, r: 42 });
+    for (const p of this.enemyBuildingPositions) obstacles.push({ x: p.x, y: p.y, r: 42 });
     const river = this.riverBand
       ? {
           xMin: this.riverBand.xMin,
@@ -464,6 +468,7 @@ export default class MainScene extends Phaser.Scene {
     const midY = this.preset.worldH / 2;
     this.myBasePos = { x: myX, y: midY };
     this.myBuildingPositions.push({ x: myX, y: midY });
+    this.enemyBuildingPositions.push({ x: enemyX, y: midY });
     this.myCastle.setPosition(myX, midY);
     this.enemyCastle.setPosition(enemyX, midY);
     this.myCastle.setDepth(this.yDepth(midY));
@@ -509,6 +514,7 @@ export default class MainScene extends Phaser.Scene {
       myImg.setData("kind", "my-building");
       myImg.setData("role", b);
       this.myBuildingPositions.push({ x: myBx, y: by });
+      this.enemyBuildingPositions.push({ x: enemyBx, y: by });
 
       if (b === "tower") {
         this.myTowerPos = { x: myBx, y: by };
