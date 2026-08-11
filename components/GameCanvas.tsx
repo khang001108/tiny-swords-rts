@@ -252,6 +252,16 @@ export default function GameCanvas({
           )}
         </div>
 
+        {/* Control group 1-4 — chạm nhanh để chọn lại, giữ ~500ms để lưu quân đang chọn vào group đó */}
+        <div
+          className="absolute top-0 left-0 z-30 flex gap-1.5"
+          style={{ paddingTop: "max(8px, env(safe-area-inset-top))", paddingLeft: "max(8px, env(safe-area-inset-left))" }}
+        >
+          {[1, 2, 3, 4].map((n) => (
+            <ControlGroupButton key={n} n={n} />
+          ))}
+        </div>
+
         <div className="absolute top-10 inset-x-0 flex justify-center z-10 pointer-events-none px-3">
           <span className="text-[11px] text-white/85 bg-black/30 rounded-full px-2.5 py-0.5 drop-shadow">
             {mode === "online" ? `Phòng ${roomCode}` : mode === "endless" ? `🌊 Sóng ${wave}` : "Đấu với Bot"}
@@ -520,6 +530,35 @@ function MinimapPanel({ data }: { data: MinimapData }) {
         />
       </svg>
     </div>
+  );
+}
+
+function ControlGroupButton({ n }: { n: number }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedRef = useRef(false);
+
+  const onDown = () => {
+    savedRef.current = false;
+    timerRef.current = setTimeout(() => {
+      savedRef.current = true;
+      gameEvents.emit("control-group-save", n);
+    }, 500);
+  };
+  const onUp = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!savedRef.current) gameEvents.emit("control-group-select", n);
+  };
+
+  return (
+    <button
+      onPointerDown={onDown}
+      onPointerUp={onUp}
+      onPointerLeave={() => timerRef.current && clearTimeout(timerRef.current)}
+      className="w-7 h-7 rounded-full bg-[#3a2c1a]/85 border border-white/30 flex items-center justify-center shadow-md active:scale-95 transition text-white text-[11px] font-bold select-none"
+      title="Chạm nhanh: chọn lại — Giữ ~0.5s: lưu quân đang chọn"
+    >
+      {n}
+    </button>
   );
 }
 

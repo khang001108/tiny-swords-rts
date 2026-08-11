@@ -299,6 +299,8 @@ export default class MainScene extends Phaser.Scene {
     gameEvents.on("build-house", this.handleBuildHouse, this);
     gameEvents.on("cancel-build-mode", this.cancelBuildMode, this);
     gameEvents.on("minimap-jump", this.handleMinimapJump, this);
+    gameEvents.on("control-group-save", this.saveControlGroup, this);
+    gameEvents.on("control-group-select", this.selectControlGroup, this);
     gameEvents.on("build-resource-house", this.handleBuildResourceHouse, this);
     gameEvents.on("toggle-pause", this.handleTogglePause, this);
     gameEvents.on("leave-room", this.handleLeave, this);
@@ -308,6 +310,8 @@ export default class MainScene extends Phaser.Scene {
       gameEvents.off("build-house", this.handleBuildHouse, this);
       gameEvents.off("cancel-build-mode", this.cancelBuildMode, this);
       gameEvents.off("minimap-jump", this.handleMinimapJump, this);
+      gameEvents.off("control-group-save", this.saveControlGroup, this);
+      gameEvents.off("control-group-select", this.selectControlGroup, this);
     gameEvents.off("build-resource-house", this.handleBuildResourceHouse, this);
       gameEvents.off("toggle-pause", this.handleTogglePause, this);
       gameEvents.off("leave-room", this.handleLeave, this);
@@ -327,6 +331,24 @@ export default class MainScene extends Phaser.Scene {
       this.input.off("pointermove", this.handlePointerMove, this);
       this.input.off("pointerup", this.handlePointerUp, this);
     });
+
+    // Control group bằng bàn phím (máy tính): Ctrl+1..4 lưu, 1..4 gọi lại
+    if (this.input.keyboard) {
+      const codes = [
+        Phaser.Input.Keyboard.KeyCodes.ONE,
+        Phaser.Input.Keyboard.KeyCodes.TWO,
+        Phaser.Input.Keyboard.KeyCodes.THREE,
+        Phaser.Input.Keyboard.KeyCodes.FOUR,
+      ];
+      codes.forEach((code, idx) => {
+        const n = idx + 1;
+        const key = this.input.keyboard!.addKey(code);
+        key.on("down", (event: KeyboardEvent) => {
+          if (event.ctrlKey || event.metaKey) this.saveControlGroup(n);
+          else this.selectControlGroup(n);
+        });
+      });
+    }
 
     this.connectRoom();
     this.emitHud();
@@ -987,6 +1009,9 @@ export default class MainScene extends Phaser.Scene {
   // Nhờ vậy: chạm vào Castle rồi vuốt để kéo camera sẽ KHÔNG mở Build Menu.
   private readonly TAP_THRESHOLD = 10;
   private pendingHit: Phaser.GameObjects.GameObject | null = null;
+  private lastTapId: string | null = null;
+  private lastTapAt = 0;
+  private controlGroups: Record<number, { kind: "unit" | "villager"; id: string }[]> = { 1: [], 2: [], 3: [], 4: [] };
 
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.gameOver || this.paused) return;
@@ -1093,12 +1118,36 @@ export default class MainScene extends Phaser.Scene {
     if (hit) {
       const kind = hit.getData("kind");
       if (kind === "my-unit") {
-        this.selected = [{ kind: "unit", id: hit.getData("unitId") }];
+        const unitId = hit.getData("unitId");
+        if (this.checkDoubleTap(unitId)) {
+          const u = this.localUnits.get(unitId);
+          if (u) {
+            this.selected = Array.from(this.localUnits.values())
+              .filter((ou) => ou.state !== "dead" && ou.type === u.type)
+              .map((ou) => ({ kind: "unit" as const, id: ou.id }));
+          }
+        } else if (this.selected.length === 1 && this.selected[0].kind === "unit" && this.selected[0].id === unitId) {
+          this.selected = []; // bấm lại đúng unit đang chọn 1 mình → bỏ chọn (thoát khỏi lựa chọn)
+        } else {
+          this.selected = [{ kind: "unit", id: unitId }];
+        }
         this.selectedBuildingPos = null;
         return;
       }
       if (kind === "my-villager") {
-        this.selected = [{ kind: "villager", id: hit.getData("villagerId") }];
+        const villagerId = hit.getData("villagerId");
+        if (this.checkDoubleTap(villagerId)) {
+          this.selected =
+            this.myVillagers?.sprites.map((s) => ({ kind: "villager" as const, id: s.getData("villagerId") })) ?? [];
+        } else if (
+          this.selected.length === 1 &&
+          this.selected[0].kind === "villager" &&
+          this.selected[0].id === villagerId
+        ) {
+          this.selected = [];
+        } else {
+          this.selected = [{ kind: "villager", id: villagerId }];
+        }
         this.selectedBuildingPos = null;
         return;
       }
@@ -1122,7 +1171,10 @@ export default class MainScene extends Phaser.Scene {
         this.issueMoveCommand(obj.x, obj.y);
         return;
       }
-      if (kind === "my-building" && this.selected.length === 0) {
+      if (kind === "my-building") {
+        // Bấm công trình CỦA MÌNH luôn ưu tiên mở bảng quản lý — kể cả khi đang chọn quân,
+        // đây cũng là 1 cách "thoát" khỏi lựa chọn quân hiện tại (không lỡ ra lệnh quân đi tới đó).
+        this.selected = [];
         const obj = hit as unknown as { x: number; y: number };
         this.selectedBuildingPos = { x: obj.x, y: obj.y };
         gameEvents.emit("select-building", { role: hit.getData("role") });
@@ -1137,6 +1189,14 @@ export default class MainScene extends Phaser.Scene {
       this.selectedBuildingPos = null;
       gameEvents.emit("deselect-building");
     }
+  }
+
+  private checkDoubleTap(id: string): boolean {
+    const now = this.time.now;
+    const isDouble = this.lastTapId === id && now - this.lastTapAt < 350;
+    this.lastTapId = id;
+    this.lastTapAt = now;
+    return isDouble;
   }
 
   private resetPointerState() {
@@ -1578,6 +1638,26 @@ export default class MainScene extends Phaser.Scene {
    * zoom theo camera — đó chính là lỗi minimap co giãn/lệch đã gặp). */
   private handleMinimapJump(p: { x: number; y: number }) {
     this.cameras.main.centerOn(p.x, p.y);
+  }
+
+  /** Ctrl+N (PC) hoặc giữ nút N + đang có quân chọn (mobile) → lưu lựa chọn hiện tại vào group N */
+  private saveControlGroup(n: number) {
+    if (!this.selected.length) return;
+    this.controlGroups[n] = [...this.selected];
+    gameEvents.emit("control-group-update", { group: n, count: this.selected.length });
+  }
+
+  /** Bấm N (PC) hoặc tap nút N (mobile) → chọn lại toàn bộ quân còn sống trong group N */
+  private selectControlGroup(n: number) {
+    const group = this.controlGroups[n];
+    if (!group || !group.length) return;
+    const stillAlive = group.filter((s) =>
+      s.kind === "unit" ? this.localUnits.has(s.id) : !!this.myVillagers?.getPos(s.id)
+    );
+    this.controlGroups[n] = stillAlive; // loại luôn ref chết khỏi group, không giữ lại
+    if (!stillAlive.length) return;
+    this.selected = stillAlive;
+    this.selectedBuildingPos = null;
   }
 
   private emitMinimapData() {
