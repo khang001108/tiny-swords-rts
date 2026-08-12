@@ -46,14 +46,21 @@ const MAP_BASE = "/assets/maps/community1";
 export default class TiledScene extends Phaser.Scene {
   private meta!: MetaJson;
   private navGrid: NavGrid | null = null;
-  private testUnit!: Phaser.GameObjects.Arc;
-  private testPath: { x: number; y: number }[] | null = null;
-  private testPathIndex = 0;
+  private player!: Phaser.GameObjects.Sprite;
+  private playerPath: { x: number; y: number }[] | null = null;
+  private playerPathIndex = 0;
+  private playerState: "idle" | "walk" = "idle";
   private minZoom = 0.3;
   private maxZoom = 2;
   private statusText!: Phaser.GameObjects.Text;
   private mapLayers: Phaser.Tilemaps.TilemapLayer[] = [];
   private animFrameIndex = 0;
+  private selectionRing!: Phaser.GameObjects.Graphics;
+
+  // phân biệt TAP (ra lệnh di chuyển) và DRAG (kéo camera) — không xử lý ngay lúc pointerdown
+  private readonly TAP_THRESHOLD = 10;
+  private dragStart: { x: number; y: number; scrollX: number; scrollY: number } | null = null;
+  private isDragging = false;
 
   constructor() {
     super("TiledScene");
@@ -61,6 +68,8 @@ export default class TiledScene extends Phaser.Scene {
 
   preload() {
     this.load.json("meta", `${MAP_BASE}/meta.json`);
+    this.load.spritesheet("player_idle", "/assets/units2/warrior_blue_idle.png", { frameWidth: 192, frameHeight: 192 });
+    this.load.spritesheet("player_run", "/assets/units2/warrior_blue_run.png", { frameWidth: 192, frameHeight: 192 });
   }
 
   create() {
@@ -148,10 +157,28 @@ export default class TiledScene extends Phaser.Scene {
     const west = bases[0];
     const east = bases[bases.length - 1];
 
-    // Quân test — spawn cạnh base phía Tây, bấm vào bản đồ để thấy nó tự né nước/đá đi vòng
+    // Nhân vật điều khiển được — spawn cạnh base phía Tây, luôn di chuyển bằng đường A* thật
+    // (findPath tự nắn về ô walkable gần nhất nếu bấm trúng nước/đá — không bao giờ đi xuyên).
+    this.anims.create({
+      key: "player-idle",
+      frames: this.anims.generateFrameNumbers("player_idle", { start: 0, end: 7 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: "player-walk",
+      frames: this.anims.generateFrameNumbers("player_run", { start: 0, end: 5 }),
+      frameRate: 10,
+      repeat: -1,
+    });
+
     if (west) {
-      this.testUnit = this.add.circle(west.x + 60, west.y + 60, 14, 0x60a5fa).setDepth(2000).setStrokeStyle(2, 0xffffff);
+      this.player = this.add.sprite(west.x + 70, west.y + 70, "player_idle", 0).setScale(0.4);
+      this.player.play("player-idle");
+      this.player.setDepth(5000);
     }
+
+    this.selectionRing = this.add.graphics().setDepth(4999);
 
     // Camera
     const cam = this.cameras.main;
@@ -180,7 +207,7 @@ export default class TiledScene extends Phaser.Scene {
     });
 
     this.statusText = this.add
-      .text(10, 10, `Map cộng đồng — ${this.meta.worldW}x${this.meta.worldH}px — bấm vào map để test A*`, {
+      .text(10, 10, `Map cộng đồng — ${this.meta.worldW}x${this.meta.worldH}px — bấm vào map để di chuyển`, {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#00000090",
@@ -189,48 +216,73 @@ export default class TiledScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(9999);
 
+    // ── Input: TAP = ra lệnh di chuyển, DRAG = kéo camera — tách biệt bằng ngưỡng khoảng cách,
+    // không xử lý ngay lúc pointerdown (giống hệt cách MainScene.ts xử lý, tránh lỡ tay mở nhầm) ──
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (!this.navGrid || !this.testUnit) return;
-      this.testPath = findPath(this.navGrid, this.testUnit.x, this.testUnit.y, p.worldX, p.worldY);
-      this.testPathIndex = 0;
+      this.dragStart = { x: p.x, y: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY };
+      this.isDragging = false;
     });
 
-    // Kéo camera bằng chuột/chạm để xem toàn bản đồ
-    let dragStart: { x: number; y: number; scrollX: number; scrollY: number } | null = null;
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      if (!p.isDown || !dragStart) return;
-      cam.scrollX = dragStart.scrollX - (p.x - dragStart.x) / cam.zoom;
-      cam.scrollY = dragStart.scrollY - (p.y - dragStart.y) / cam.zoom;
-    });
-    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      dragStart = { x: p.x, y: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY };
-    });
-    this.input.on("pointerup", () => (dragStart = null));
-
-    this.input.on(
-      "wheel",
-      (_p: unknown, _go: unknown, _dx: number, dy: number) => {
-        cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, this.minZoom, this.maxZoom));
+      if (!p.isDown || !this.dragStart) return;
+      const dx = p.x - this.dragStart.x;
+      const dy = p.y - this.dragStart.y;
+      if (!this.isDragging && Math.hypot(dx, dy) > this.TAP_THRESHOLD) this.isDragging = true;
+      if (this.isDragging) {
+        cam.scrollX = this.dragStart.scrollX - dx / cam.zoom;
+        cam.scrollY = this.dragStart.scrollY - dy / cam.zoom;
       }
-    );
+    });
+
+    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
+      if (!this.isDragging && this.dragStart && this.navGrid && this.player) {
+        // chỉ là 1 cú TAP (không kéo) → ra lệnh di chuyển tới đúng điểm bấm
+        this.playerPath = findPath(this.navGrid, this.player.x, this.player.y, p.worldX, p.worldY);
+        this.playerPathIndex = 0;
+      }
+      this.dragStart = null;
+      this.isDragging = false;
+    });
+
+    this.input.on("wheel", (_p: unknown, _go: unknown, _dx: number, dy: number) => {
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, this.minZoom, this.maxZoom));
+    });
   }
 
   update() {
-    if (!this.testUnit || !this.testPath || !this.testPath.length) return;
-    const wp = this.testPath[this.testPathIndex];
+    if (!this.player) return;
+
+    // vòng tròn chọn nhân vật, luôn theo đúng vị trí hiện tại
+    this.selectionRing.clear();
+    this.selectionRing.lineStyle(2, 0xffffff, 0.85);
+    this.selectionRing.strokeEllipse(this.player.x, this.player.y, 36, 18);
+
+    if (!this.playerPath || !this.playerPath.length) {
+      if (this.playerState !== "idle") {
+        this.playerState = "idle";
+        this.player.play("player-idle", true);
+      }
+      return;
+    }
+    const wp = this.playerPath[this.playerPathIndex];
     if (!wp) return;
-    const dx = wp.x - this.testUnit.x;
-    const dy = wp.y - this.testUnit.y;
+    if (this.playerState !== "walk") {
+      this.playerState = "walk";
+      this.player.play("player-walk", true);
+    }
+    const dx = wp.x - this.player.x;
+    const dy = wp.y - this.player.y;
     const d = Math.hypot(dx, dy);
     const step = 140 * (1 / 60);
     if (d <= Math.max(step, 4)) {
-      this.testUnit.x = wp.x;
-      this.testUnit.y = wp.y;
-      this.testPathIndex++;
-      if (this.testPathIndex >= this.testPath.length) this.testPath = null;
+      this.player.x = wp.x;
+      this.player.y = wp.y;
+      this.playerPathIndex++;
+      if (this.playerPathIndex >= this.playerPath.length) this.playerPath = null;
     } else {
-      this.testUnit.x += (dx / d) * step;
-      this.testUnit.y += (dy / d) * step;
+      this.player.x += (dx / d) * step;
+      this.player.y += (dy / d) * step;
+      this.player.setFlipX(dx < 0);
     }
   }
 }
