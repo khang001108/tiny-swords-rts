@@ -68,6 +68,9 @@ export default function LobbyPage() {
               <BigButton color="blue" onClick={() => router.push("/ffa")}>
                 ⚔️ Đấu 1 chọi nhiều (chọn phe, vs 4 AI)
               </BigButton>
+              <BigButton color="red" onClick={() => router.push("/community-map")}>
+                🧪 Map cộng đồng (thử nghiệm)
+              </BigButton>
               <BigButton color="red" onClick={() => setStep("endless-map")}>
                 🌊 Endless Mode (sóng vô tận)
               </BigButton>

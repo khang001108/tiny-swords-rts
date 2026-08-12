@@ -58,6 +58,25 @@ export function buildNavGrid(
   return { cols, rows, cellSize, blocked, worldW, worldH };
 }
 
+/** Dựng NavGrid trực tiếp từ bảng walkable đã tính sẵn (dùng cho map vẽ tay bằng Tiled —
+ * không suy ra vật cản từ vòng tròn/sông như buildNavGrid, mà đọc thẳng true/false từng ô). */
+export function buildNavGridFromWalkable(
+  walkableGrid: boolean[][],
+  cellSize: number,
+  worldW: number,
+  worldH: number
+): NavGrid {
+  const rows = walkableGrid.length;
+  const cols = rows > 0 ? walkableGrid[0].length : 0;
+  const blocked = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      blocked[r * cols + c] = walkableGrid[r][c] ? 0 : 1;
+    }
+  }
+  return { cols, rows, cellSize, blocked, worldW, worldH };
+}
+
 function cellIndex(grid: NavGrid, c: number, r: number) {
   return r * grid.cols + c;
 }
