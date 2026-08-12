@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { buildNavGridFromWalkable, findPath, NavGrid } from "@/game/pathfinding";
+import { gameEvents } from "@/game/events";
 
 interface MetaObjectAnimation {
   tilesetName: string;
@@ -61,6 +62,9 @@ export default class TiledScene extends Phaser.Scene {
   private readonly TAP_THRESHOLD = 10;
   private dragStart: { x: number; y: number; scrollX: number; scrollY: number } | null = null;
   private isDragging = false;
+  private pinchStartDist = 0;
+  private pinchStartZoom = 1;
+  private lastMinimapEmitAt = 0;
 
   constructor() {
     super("TiledScene");
@@ -152,6 +156,12 @@ export default class TiledScene extends Phaser.Scene {
     // Pathfinding thật — dựng NavGrid từ walkableGrid đã tính sẵn (không suy luận từ vòng tròn/sông giả)
     this.navGrid = buildNavGridFromWalkable(this.meta.walkableGrid, this.meta.tileSize, this.meta.worldW, this.meta.worldH);
 
+    // Building/rừng đặt bằng OBJECT (không nằm trong walkableGrid của tile layer) cũng phải chặn
+    // đường đi — trước đây bị bỏ sót nên nhân vật đi xuyên thẳng qua lâu đài/cụm cây.
+    this.blockObjectFootprints();
+
+    this.input.addPointer(2); // cho phép theo dõi 2 ngón tay để pinch-zoom trên điện thoại
+
     // 2 base — xác định trái/phải theo toạ độ X thật (không dựa vào tên đặt)
     const bases = this.meta.objects.filter((o) => o.type === "base").sort((a, b) => a.x - b.x);
     const west = bases[0];
@@ -219,11 +229,13 @@ export default class TiledScene extends Phaser.Scene {
     // ── Input: TAP = ra lệnh di chuyển, DRAG = kéo camera — tách biệt bằng ngưỡng khoảng cách,
     // không xử lý ngay lúc pointerdown (giống hệt cách MainScene.ts xử lý, tránh lỡ tay mở nhầm) ──
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return; // đang pinch, bỏ qua tap thường
       this.dragStart = { x: p.x, y: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY };
       this.isDragging = false;
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      if (this.input.pointer1?.isDown && this.input.pointer2?.isDown) return;
       if (!p.isDown || !this.dragStart) return;
       const dx = p.x - this.dragStart.x;
       const dy = p.y - this.dragStart.y;
@@ -247,9 +259,85 @@ export default class TiledScene extends Phaser.Scene {
     this.input.on("wheel", (_p: unknown, _go: unknown, _dx: number, dy: number) => {
       cam.setZoom(Phaser.Math.Clamp(cam.zoom - dy * 0.001, this.minZoom, this.maxZoom));
     });
+
+    gameEvents.on("community-minimap-jump", (p: { x: number; y: number }) => {
+      cam.centerOn(p.x, p.y);
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      gameEvents.off("community-minimap-jump");
+    });
   }
 
-  update() {
+  /** Building/rừng đặt bằng object không tự có trong walkableGrid (chỉ tile layer mới có) —
+   * đục thủng thêm vào navGrid theo đúng vùng chiếm chỗ của từng object để chặn đường đi qua. */
+  private blockObjectFootprints() {
+    if (!this.navGrid) return;
+    const cellSize = this.navGrid.cellSize;
+    const BLOCKING_TYPES = new Set(["base", "forest"]);
+    for (const o of this.meta.objects) {
+      if (!BLOCKING_TYPES.has(o.type)) continue;
+      // chỉ chặn phần thân dưới (footprint) chứ không chặn cả tán cây/mái nhà phía trên —
+      // ước lượng 35% chiều cao phía dưới object, thu hẹp bề ngang 70% để tránh chặn quá tay
+      const footW = o.width * 0.7;
+      const footH = o.height * 0.35;
+      const footX = o.x + (o.width - footW) / 2;
+      const footY = o.y - footH;
+      const c0 = Math.floor(footX / cellSize);
+      const c1 = Math.floor((footX + footW) / cellSize);
+      const r0 = Math.floor(footY / cellSize);
+      const r1 = Math.floor((footY + footH) / cellSize);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          if (c < 0 || r < 0 || c >= this.navGrid.cols || r >= this.navGrid.rows) continue;
+          this.navGrid.blocked[r * this.navGrid.cols + c] = 1;
+        }
+      }
+    }
+  }
+
+  private handlePinchZoom(cam: Phaser.Cameras.Scene2D.Camera) {
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    if (p1?.isDown && p2?.isDown) {
+      const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+      if (this.pinchStartDist === 0) {
+        this.pinchStartDist = dist;
+        this.pinchStartZoom = cam.zoom;
+        this.dragStart = null;
+        this.isDragging = false;
+      } else {
+        const scale = dist / this.pinchStartDist;
+        cam.setZoom(Phaser.Math.Clamp(this.pinchStartZoom * scale, this.minZoom, this.maxZoom));
+      }
+    } else {
+      this.pinchStartDist = 0;
+    }
+  }
+
+  private emitMinimapData() {
+    const cam = this.cameras.main;
+    const bases = this.meta.objects.filter((o) => o.type === "base").sort((a, b) => a.x - b.x);
+    gameEvents.emit("community-minimap-data", {
+      worldW: this.meta.worldW,
+      worldH: this.meta.worldH,
+      player: this.player ? { x: this.player.x, y: this.player.y } : null,
+      bases: bases.map((b) => ({ x: b.x, y: b.y })),
+      camera: { x: cam.worldView.x, y: cam.worldView.y, w: cam.worldView.width, h: cam.worldView.height },
+    });
+  }
+
+  update(_time: number, delta: number) {
+    const cam = this.cameras.main;
+    this.handlePinchZoom(cam);
+
+    if (this.player) {
+      this.lastMinimapEmitAt += delta;
+      if (this.lastMinimapEmitAt >= 130) {
+        this.lastMinimapEmitAt = 0;
+        this.emitMinimapData();
+      }
+    }
+
     if (!this.player) return;
 
     // vòng tròn chọn nhân vật, luôn theo đúng vị trí hiện tại
