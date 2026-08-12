@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, CSSProperties } from "react";
 import { randomRoomCode } from "@/game/net";
 import { MAP_PRESETS, MapId, MAP_ID_ORDER, RESOURCE_NODE_LAYOUT } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
@@ -44,35 +44,34 @@ export default function LobbyPage() {
     >
       <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/70" />
       <div className="relative z-10 w-full flex flex-col items-center">
-        <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-20 h-20 object-contain mb-1 drop-shadow-lg" />
-        <h1
-          className="text-4xl font-extrabold mb-1 text-center tracking-wide text-white"
-          style={{ textShadow: "0 2px 0 rgba(0,0,0,0.6), 0 0 18px rgba(0,0,0,0.5)" }}
-        >
-          Tiny Swords RTS
-        </h1>
-        <p className="text-white/80 mb-6 text-center text-sm drop-shadow">
-          Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time
-        </p>
+        <img src="/assets/buildings/Castle_Blue.png" alt="" className="w-16 h-16 object-contain drop-shadow-lg relative z-10 -mb-3" />
+        <NineSlice prefix="banner" className="w-full max-w-[280px]" style={{ minHeight: 96 }}>
+          <div className="px-5 py-2 text-center">
+            <h1 className="text-2xl font-extrabold tracking-wide text-[#3a2c1a]">Tiny Swords RTS</h1>
+            <p className="text-[#3a2c1a]/70 text-[11px] mt-0.5">
+              Xây căn cứ, chiêu mộ quân, đấu với Bot hoặc bạn bè real-time
+            </p>
+          </div>
+        </NineSlice>
 
-      <NineSlice prefix="paper" className="w-full max-w-sm" style={{ minHeight: 0 }}>
+      <NineSlice prefix="paper" className="w-full max-w-sm mt-4" style={{ minHeight: 0 }}>
         <div className="w-full px-6 py-7 text-[#3a2c1a]">
           {step === "mode" && (
             <div className="space-y-4">
               <BigButton color="blue" onClick={() => setStep("bot-map")}>
-                🤖 Chơi với Bot
+                Chơi với Bot
               </BigButton>
               <BigButton color="red" onClick={() => setStep("online-choice")}>
-                🧑‍🤝‍🧑 Chơi với người
+                Chơi với người
               </BigButton>
               <BigButton color="blue" onClick={() => router.push("/ffa")}>
-                ⚔️ Đấu 1 chọi nhiều (chọn phe, vs 4 AI)
+                Đấu 1 chọi nhiều (chọn phe, vs 4 AI)
               </BigButton>
               <BigButton color="red" onClick={() => router.push("/community-map")}>
-                🧪 Map cộng đồng (thử nghiệm)
+                Map cộng đồng (thử nghiệm)
               </BigButton>
               <BigButton color="red" onClick={() => setStep("endless-map")}>
-                🌊 Endless Mode (sóng vô tận)
+                Endless Mode (sóng vô tận)
               </BigButton>
             </div>
           )}
@@ -100,11 +99,10 @@ export default function LobbyPage() {
                   maxLength={6}
                   className="flex-1 px-3 py-3 rounded-lg bg-black/5 border border-[#3a2c1a]/30 outline-none uppercase tracking-widest text-center font-mono text-[#3a2c1a] placeholder:text-[#3a2c1a]/40"
                 />
-                <button
-                  onClick={joinRoom}
-                  className="px-5 py-3 rounded-lg bg-[#3a2c1a]/10 hover:bg-[#3a2c1a]/20 border border-[#3a2c1a]/30 font-semibold"
-                >
-                  Vào
+                <button onClick={joinRoom} className="w-20 h-[50px] shrink-0 active:scale-[0.98] transition-transform">
+                  <NineSlice prefix="btn-blue" className="w-full h-full">
+                    <span className="font-bold text-white text-sm drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">Vào</span>
+                  </NineSlice>
                 </button>
               </div>
               <button onClick={() => setStep("mode")} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a]">
@@ -140,9 +138,33 @@ function BigButton({
   return (
     <button onClick={onClick} className="w-full h-16 block active:scale-[0.98] transition-transform">
       <NineSlice prefix={color === "blue" ? "btn-blue" : "btn-red"} className="w-full h-full">
-        <span className="font-bold text-white text-lg drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">{children}</span>
+        <span className="flex items-center justify-center gap-2 px-2">
+          <RibbonTag color={color} />
+          <span className="font-bold text-white text-[15px] leading-tight drop-shadow-[1px_1px_0_rgba(0,0,0,0.5)]">
+            {children}
+          </span>
+        </span>
       </NineSlice>
     </button>
+  );
+}
+
+/** Lá cờ/ribbon nhỏ (cắt từ UI Elements/Ribbons — Free Pack) đứng trước text nút, thay cho icon emoji tự chế */
+function RibbonTag({ color }: { color: "blue" | "red" }) {
+  const cellStyle = (part: "l" | "m" | "r"): CSSProperties => ({
+    backgroundImage: `url(/assets/ui9/ribbon-${color}-${part}.png)`,
+    backgroundSize: "100% 100%",
+    backgroundRepeat: "no-repeat",
+  });
+  return (
+    <span
+      className="shrink-0"
+      style={{ display: "grid", gridTemplateColumns: "9px 12px 9px", width: 30, height: 20 }}
+    >
+      <span style={cellStyle("l")} />
+      <span style={cellStyle("m")} />
+      <span style={cellStyle("r")} />
+    </span>
   );
 }
 
