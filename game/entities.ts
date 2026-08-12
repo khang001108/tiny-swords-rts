@@ -73,9 +73,9 @@ export const FRAME_SIZE = 192;
 // ── Bản đồ — dữ liệu map đã tách ra thư mục game/maps/ (xem game/maps/index.ts) ─────────
 // Re-export ở đây để mọi chỗ đang `import { MapPreset, MAP_PRESETS } from "@/game/entities"`
 // không phải sửa gì — nhưng dữ liệu THẬT giờ nằm ở game/maps/, không phải trong file này nữa.
-import type { MapPreset, MapSize, BuildingKey } from "@/game/maps";
+import type { MapPreset, MapId, BuildingKey } from "@/game/maps";
 import { MAP_PRESETS } from "@/game/maps";
-export type { MapPreset, MapSize, BuildingKey };
+export type { MapPreset, MapId, BuildingKey };
 export { MAP_PRESETS };
 
 export const BASE_POP_CAP = 6;
@@ -236,16 +236,8 @@ export const PORTRAIT_H = 854;
 
 export const FFA_BOT_POP_CAP = 8;
 
-// ── Slider chọn kích thước map (thay cho 3 nút cố định) ───────────────
-export const MAP_SIZE_ORDER: MapSize[] = ["small", "medium", "large"];
-export function sliderToMapSize(t: number): MapSize {
-  if (t < 34) return "small";
-  if (t < 67) return "medium";
-  return "large";
-}
-export function mapSizeToSlider(size: MapSize): number {
-  return size === "small" ? 0 : size === "medium" ? 50 : 100;
-}
+// ── Danh sách loại map hiện có, theo đúng thứ tự hiển thị trong màn chọn map ───
+export const MAP_ID_ORDER: MapId[] = ["classic", "canyon", "plains", "stronghold"];
 
 // ── Endless Mode — sóng địch vô tận, càng lâu càng khó, lưu kỷ lục ─────
 export const ENDLESS_WAVE_INTERVAL_MS = 25000;

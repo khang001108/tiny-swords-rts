@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import MainScene from "@/game/scenes/MainScene";
-import { MapSize } from "@/game/entities";
+import { MapId } from "@/game/entities";
 
 /**
  * Canvas giờ luôn khớp đúng kích thước thật của khung chứa (container) —
@@ -13,7 +13,7 @@ export function createPhaserGame(
   roomCode: string,
   isHost: boolean,
   mode: "bot" | "online" | "endless",
-  mapSize: MapSize
+  mapId: MapId
 ): Phaser.Game {
   const w = Math.max(1, parent.clientWidth || window.innerWidth);
   const h = Math.max(1, parent.clientHeight || window.innerHeight);
@@ -30,7 +30,7 @@ export function createPhaserGame(
     },
     scene: [MainScene],
   });
-  game.scene.start("MainScene", { roomCode, isHost, mode, mapSize });
+  game.scene.start("MainScene", { roomCode, isHost, mode, mapId });
 
   // window.innerWidth/innerHeight đổi khi xoay máy — resize lại canvas thật (không hard-code kích thước).
   const onResize = () => {

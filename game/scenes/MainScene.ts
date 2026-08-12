@@ -25,7 +25,7 @@ import {
   RESOURCE_HOUSE_POP_BONUS,
   MAP_PRESETS,
   MapPreset,
-  MapSize,
+  MapId,
   computePopCap,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
@@ -159,11 +159,11 @@ export default class MainScene extends Phaser.Scene {
     super("MainScene");
   }
 
-  init(data: { roomCode: string; isHost: boolean; mode: "bot" | "online" | "endless"; mapSize: MapSize }) {
+  init(data: { roomCode: string; isHost: boolean; mode: "bot" | "online" | "endless"; mapId: MapId }) {
     this.roomCode = data.roomCode;
     this.isHost = data.isHost;
     this.mode = data.mode;
-    this.preset = MAP_PRESETS[data.mapSize] ?? MAP_PRESETS.medium;
+    this.preset = MAP_PRESETS[data.mapId] ?? MAP_PRESETS.classic;
     this.popCap = computePopCap(this.preset.buildings.length, 0, 0);
   }
 

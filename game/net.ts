@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabaseClient";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { MapId } from "@/game/maps";
 
 // ── Kiểu dữ liệu trao đổi giữa 2 client ──────────────────────────────
 export type Side = "left" | "right";
@@ -150,17 +151,29 @@ export class RoomSync implements OpponentLink {
   }
 }
 
-export function randomRoomCode(mapSize: "small" | "medium" | "large" = "medium"): string {
+// Ký tự đầu mã phòng mã hoá loại map — nhờ vậy người vào phòng (join) tự load đúng map
+// mà không cần hỏi server. Thêm map mới: chỉ cần thêm 1 dòng vào 2 bảng bên dưới.
+const MAP_ID_PREFIX: Record<MapId, string> = {
+  classic: "C",
+  canyon: "N", // "N" = Núi/Hẻm Núi — "C" đã dùng cho Classic
+  plains: "P",
+  stronghold: "F", // "F" = Fortress
+};
+const PREFIX_TO_MAP_ID: Record<string, MapId> = {
+  C: "classic",
+  N: "canyon",
+  P: "plains",
+  F: "stronghold",
+};
+
+export function randomRoomCode(mapId: MapId = "classic"): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
   for (let i = 0; i < 5; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  const prefix = mapSize === "small" ? "S" : mapSize === "large" ? "L" : "M";
-  return prefix + out;
+  return MAP_ID_PREFIX[mapId] + out;
 }
 
-export function mapSizeFromRoomCode(code: string): "small" | "medium" | "large" {
+export function mapIdFromRoomCode(code: string): MapId {
   const c = code.trim().toUpperCase()[0];
-  if (c === "S") return "small";
-  if (c === "L") return "large";
-  return "medium";
+  return PREFIX_TO_MAP_ID[c] ?? "classic";
 }

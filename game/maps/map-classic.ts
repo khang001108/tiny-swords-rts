@@ -1,9 +1,10 @@
 import { MapPreset } from "./types";
 
-export const MAP_MEDIUM: MapPreset = {
-  size: "medium",
-  label: "Vừa",
-  desc: "Cân bằng, nhiều không gian điều quân",
+/** Chiến trường tiêu chuẩn — cân bằng mọi mặt, hợp cho trận đầu tiên. */
+export const MAP_CLASSIC: MapPreset = {
+  id: "classic",
+  label: "Cổ Điển",
+  desc: "Chiến trường tiêu chuẩn, 2 cầu, cân bằng mọi mặt",
   worldW: 1280,
   worldH: 640,
   baseMargin: 110,

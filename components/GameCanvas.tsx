@@ -16,7 +16,7 @@ import {
 import {
   UNIT_CONFIGS,
   UnitType,
-  MapSize,
+  MapId,
   VILLAGER_COST,
   HOUSE_COST,
   RESOURCE_HOUSE_COST,
@@ -65,12 +65,12 @@ export default function GameCanvas({
   roomCode,
   isHost,
   mode,
-  mapSize,
+  mapId,
 }: {
   roomCode: string;
   isHost: boolean;
   mode: "bot" | "online" | "endless";
-  mapSize: MapSize;
+  mapId: MapId;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudUpdate>({
@@ -119,7 +119,7 @@ export default function GameCanvas({
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const game = createPhaserGame(containerRef.current, roomCode, isHost, mode, mapSize);
+    const game = createPhaserGame(containerRef.current, roomCode, isHost, mode, mapId);
 
     const onHud = (p: HudUpdate) => setHud(p);
     const onEnd = (p: GameEndUpdate) => {
@@ -176,7 +176,7 @@ export default function GameCanvas({
       game.destroy(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomCode, isHost, mode, mapSize]);
+  }, [roomCode, isHost, mode, mapId]);
 
   const spawn = (type: UnitType) => gameEvents.emit("spawn-unit", type);
   const spawnVillager = () => gameEvents.emit("spawn-villager");

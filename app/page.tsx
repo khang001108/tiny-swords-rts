@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { randomRoomCode } from "@/game/net";
-import { MAP_PRESETS, MapSize, RESOURCE_NODE_LAYOUT, sliderToMapSize } from "@/game/entities";
+import { MAP_PRESETS, MapId, MAP_ID_ORDER, RESOURCE_NODE_LAYOUT } from "@/game/entities";
 import NineSlice from "@/components/NineSlice";
 
 type Step = "mode" | "bot-map" | "online-choice" | "online-map" | "endless-map";
@@ -13,17 +13,17 @@ export default function LobbyPage() {
   const [step, setStep] = useState<Step>("mode");
   const [joinCode, setJoinCode] = useState("");
 
-  const startBot = (map: MapSize) => {
+  const startBot = (map: MapId) => {
     const id = Math.random().toString(36).slice(2, 8);
     router.push(`/game/bot-${id}?mode=bot&map=${map}`);
   };
 
-  const startEndless = (map: MapSize) => {
+  const startEndless = (map: MapId) => {
     const id = Math.random().toString(36).slice(2, 8);
     router.push(`/game/endless-${id}?mode=endless&map=${map}`);
   };
 
-  const createOnlineRoom = (map: MapSize) => {
+  const createOnlineRoom = (map: MapId) => {
     const code = randomRoomCode(map);
     router.push(`/game/${code}?host=1&mode=online`);
   };
@@ -146,50 +146,29 @@ function BigButton({
   );
 }
 
-function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize) => void }) {
-  const [t, setT] = useState(50);
-  const size = sliderToMapSize(t);
-  const p = MAP_PRESETS[size];
+/** Icon đại diện cho từng loại map — lấy từ bộ UI đã cắt sẵn (public/assets/ui9), nguồn gốc
+    từ gói Tiny Swords / Tiny Swords (Free Pack). */
+const MAP_ICON: Record<MapId, string> = {
+  classic: "swords",
+  canyon: "shield",
+  plains: "gold",
+  stronghold: "hammer",
+};
+
+function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapId) => void }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <p className="text-[#3a2c1a]/70 text-sm text-center flex items-center justify-center gap-1">
         <img src="/assets/ui9/icon-hammer.png" className="icon-inline" alt="" />
-        Chọn kích thước bản đồ
+        Chọn loại bản đồ
       </p>
 
-      <div className="flex justify-center">
-        <MapPreviewSvg size={size} />
+      <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-0.5 -mr-0.5">
+        {MAP_ID_ORDER.map((id) => (
+          <MapCard key={id} mapId={id} onPick={onPick} />
+        ))}
       </div>
 
-      <div className="text-center">
-        <div className="font-bold text-[#3a2c1a]">
-          {p.label} <span className="text-[#3a2c1a]/40 text-xs font-normal">({p.worldW}×{p.worldH})</span>
-        </div>
-        <div className="text-[#3a2c1a]/55 text-xs">{p.desc}</div>
-      </div>
-
-      <div className="px-1">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={50}
-          value={t}
-          onChange={(e) => setT(Number(e.target.value))}
-          className="w-full accent-[#3a2c1a] cursor-pointer"
-        />
-        <div className="flex justify-between text-[11px] text-[#3a2c1a]/50 px-0.5 -mt-1">
-          <span>Nhỏ</span>
-          <span>Vừa</span>
-          <span>Lớn</span>
-        </div>
-      </div>
-
-      <button onClick={() => onPick(size)} className="w-full h-14 block">
-        <NineSlice prefix="btn-blue" className="w-full h-full">
-          <span className="font-bold text-white">Bắt đầu</span>
-        </NineSlice>
-      </button>
       <button onClick={onBack} className="text-[#3a2c1a]/50 text-sm hover:text-[#3a2c1a] block mx-auto">
         ← Quay lại
       </button>
@@ -197,10 +176,30 @@ function MapPicker({ onBack, onPick }: { onBack: () => void; onPick: (m: MapSize
   );
 }
 
-/** Xem trước bố cục bản đồ thật (vị trí căn cứ + mỏ tài nguyên) trước khi vào trận */
-function MapPreviewSvg({ size }: { size: MapSize }) {
-  const p = MAP_PRESETS[size];
-  const W = 160;
+/** 1 dòng bản đồ trong danh sách chọn — bấm trực tiếp vào để bắt đầu, không cần bước xác nhận riêng */
+function MapCard({ mapId, onPick }: { mapId: MapId; onPick: (m: MapId) => void }) {
+  const p = MAP_PRESETS[mapId];
+  return (
+    <button
+      onClick={() => onPick(mapId)}
+      className="w-full flex items-center gap-3 rounded-lg bg-black/5 hover:bg-black/10 active:scale-[0.98] transition border border-[#3a2c1a]/15 px-2.5 py-2.5 text-left"
+    >
+      <MapPreviewSvg mapId={mapId} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <img src={`/assets/ui9/icon-${MAP_ICON[mapId]}.png`} className="icon-inline" alt="" />
+          <span className="font-bold text-[#3a2c1a] text-sm">{p.label}</span>
+        </div>
+        <p className="text-[#3a2c1a]/55 text-[11px] leading-snug mt-0.5">{p.desc}</p>
+      </div>
+    </button>
+  );
+}
+
+/** Xem trước bố cục bản đồ thật (vị trí căn cứ + mỏ tài nguyên) — dùng làm thumbnail trong danh sách chọn map */
+function MapPreviewSvg({ mapId }: { mapId: MapId }) {
+  const p = MAP_PRESETS[mapId];
+  const W = 88;
   const H = Math.round((p.worldH / p.worldW) * W);
   const sx = W / p.worldW;
   const sy = H / p.worldH;
@@ -211,11 +210,11 @@ function MapPreviewSvg({ size }: { size: MapSize }) {
   const riverX = p.riverX * sx;
   const riverW = Math.max(3, p.riverWidth * sx);
 
-  const resDot = (baseX: number, dir: 1 | -1, color: string, key: string) => {
-    const spec = RESOURCE_NODE_LAYOUT.find((r) => r.kind === key)!;
+  const resDot = (baseX: number, dir: 1 | -1, color: string, kind: string) => {
+    const spec = RESOURCE_NODE_LAYOUT.find((r) => r.kind === kind)!;
     const x = baseX + dir * spec.offsetX * sx;
     const y = midY + spec.offsetY * sy;
-    return <circle key={key} cx={x} cy={y} r={2} fill={color} />;
+    return <circle key={`${dir > 0 ? "l" : "r"}-${kind}`} cx={x} cy={y} r={1.4} fill={color} />;
   };
 
   return (
@@ -236,14 +235,14 @@ function MapPreviewSvg({ size }: { size: MapSize }) {
         <circle
           cx={p.neutralResource.x * sx}
           cy={p.neutralResource.y * sy}
-          r={3.2}
+          r={2.2}
           fill="#facc15"
           stroke="#7a5c00"
-          strokeWidth={0.6}
+          strokeWidth={0.5}
         />
       )}
-      <rect x={leftX - 3} y={midY - 3} width={6} height={6} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.5} />
-      <rect x={rightX - 3} y={midY - 3} width={6} height={6} fill="#ef4444" stroke="#1e293b" strokeWidth={0.5} />
+      <rect x={leftX - 2.2} y={midY - 2.2} width={4.4} height={4.4} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.4} />
+      <rect x={rightX - 2.2} y={midY - 2.2} width={4.4} height={4.4} fill="#ef4444" stroke="#1e293b" strokeWidth={0.4} />
       {resDot(leftX, 1, "#a3752c", "wood")}
       {resDot(leftX, 1, "#facc15", "gold")}
       {resDot(leftX, 1, "#f472b6", "meat")}

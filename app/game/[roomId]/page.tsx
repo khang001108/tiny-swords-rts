@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { mapSizeFromRoomCode } from "@/game/net";
-import { MapSize } from "@/game/entities";
+import { mapIdFromRoomCode } from "@/game/net";
+import { MapId } from "@/game/entities";
 
 const GameCanvas = dynamic(() => import("@/components/GameCanvas"), {
   ssr: false,
@@ -19,8 +19,8 @@ export default function GameRoomPage({ params }: { params: { roomId: string } })
   const isHost = searchParams.get("host") === "1";
   const modeParam = searchParams.get("mode");
   const mode = (modeParam === "bot" || modeParam === "endless" ? modeParam : "online") as "bot" | "online" | "endless";
-  const mapParam = searchParams.get("map") as MapSize | null;
-  const mapSize: MapSize = mode === "online" ? mapSizeFromRoomCode(params.roomId) : mapParam ?? "medium";
+  const mapParam = searchParams.get("map") as MapId | null;
+  const mapId: MapId = mode === "online" ? mapIdFromRoomCode(params.roomId) : mapParam ?? "classic";
 
   return (
     <main
@@ -32,7 +32,7 @@ export default function GameRoomPage({ params }: { params: { roomId: string } })
         paddingRight: "max(4px, env(safe-area-inset-right))",
       }}
     >
-      <GameCanvas roomCode={params.roomId.toUpperCase()} isHost={isHost} mode={mode} mapSize={mapSize} />
+      <GameCanvas roomCode={params.roomId.toUpperCase()} isHost={isHost} mode={mode} mapId={mapId} />
     </main>
   );
 }

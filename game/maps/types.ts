@@ -1,13 +1,13 @@
-export type MapSize = "small" | "medium" | "large";
+export type MapId = "classic" | "canyon" | "plains" | "stronghold";
 export type BuildingKey = "tower" | "barracks" | "house1" | "monastery";
 
 /**
  * Dữ liệu 1 bản đồ — tách hẳn khỏi code gameplay (MainScene/villager/opponent không cần
- * sửa gì khi thêm map mới). Muốn tạo map tiếp theo chỉ cần thêm 1 file MAP_xxx.ts theo
+ * sửa gì khi thêm map mới). Muốn tạo map tiếp theo chỉ cần thêm 1 file map-xxx.ts theo
  * đúng khuôn này rồi đăng ký vào game/maps/index.ts — không đụng vào logic render/AI/pathfinding.
  */
 export interface MapPreset {
-  size: MapSize;
+  id: MapId;
   label: string;
   desc: string;
   worldW: number;
@@ -24,6 +24,6 @@ export interface MapPreset {
   bridgeHeight: number;
   hillSpecs: { x: number; y: number; scale: number }[];
   forestClusters: { x: number; y: number; count: number; scale: number }[];
-  /** Mỏ vàng trung lập giữa 2 lãnh thổ — bên nào cũng cử dân tới khai thác được, nhưng phải băng sông */
+  /** Mỏ vàng trung lập giữa 2 lãnh thổ — bên nào cũng cử dân tới khai thác được, nhưng phải băng sông. null = map không có mỏ trung lập. */
   neutralResource: { x: number; y: number } | null;
 }
