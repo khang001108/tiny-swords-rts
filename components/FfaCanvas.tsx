@@ -141,7 +141,7 @@ export default function FfaCanvas({ playerColor, botCount }: { playerColor: Fact
       <div className="flex gap-2 mt-3 px-1 flex-wrap items-center">
         {FFA_UNIT_TYPES.map((type) => {
           const cfg = UNIT_CONFIGS[type];
-          const disabled = hud.gold < cfg.cost || hud.myUnits >= hud.popCap;
+          const disabled = hud.gold < (cfg.cost.gold ?? 0) || hud.myUnits >= hud.popCap;
           return (
             <button
               key={type}
@@ -154,7 +154,7 @@ export default function FfaCanvas({ playerColor, botCount }: { playerColor: Fact
                   {cfg.label}
                   <span className="inline-flex items-center text-xs opacity-90">
                     <img src={icon("gold")} className="icon-inline" alt="" />
-                    {cfg.cost}
+                    {cfg.cost.gold ?? 0}
                   </span>
                 </span>
               </NineSlice>

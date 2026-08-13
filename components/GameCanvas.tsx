@@ -16,8 +16,11 @@ import {
 import {
   UNIT_CONFIGS,
   UnitType,
+  UnitCost,
   MapId,
   MAP_PRESETS,
+  BUILDING_PRODUCTION,
+  CASTLE_PRODUCES,
   VILLAGER_COST,
   HOUSE_COST,
   RESOURCE_HOUSE_COST,
@@ -30,6 +33,7 @@ import NineSlice from "@/components/NineSlice";
 const BUILDING_LABEL: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
   castle: "Lâu đài",
   barracks: "Doanh trại",
+  archery: "Nhà Cung",
   tower: "Tháp canh",
   house1: "Nhà dân",
   monastery: "Tu viện",
@@ -37,6 +41,7 @@ const BUILDING_LABEL: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, 
 const BUILDING_THUMB: Record<Exclude<BuildingRole, `resource-${ResourceKind}`>, string> = {
   castle: "/assets/buildings/Castle_Blue.png",
   barracks: "/assets/buildings/Barracks_Blue.png",
+  archery: "/assets/buildings/Archery_Blue.png",
   tower: "/assets/buildings/Tower_Blue.png",
   house1: "/assets/buildings/House1_Blue.png",
   monastery: "/assets/buildings/Monastery_Blue.png",
@@ -61,6 +66,10 @@ function buildingThumb(role: BuildingRole): string {
   return BUILDING_THUMB[role as Exclude<BuildingRole, `resource-${ResourceKind}`>];
 }
 const icon = (name: string) => `/assets/ui9/icon-${name}.png`;
+
+function canAfford(hud: HudUpdate, cost: UnitCost): boolean {
+  return hud.gold >= (cost.gold ?? 0) && hud.wood >= (cost.wood ?? 0) && hud.meat >= (cost.meat ?? 0);
+}
 
 export default function GameCanvas({
   roomCode,
@@ -191,6 +200,10 @@ export default function GameCanvas({
 
   const atCap = hud.myUnits >= hud.popCap;
   const hasNeutralResource = MAP_PRESETS[mapId].neutralResources.length > 0;
+  // Mỗi công trình chỉ ra ĐÚNG 1 loại lính riêng — Lâu đài luôn ra Lính thường, các công
+  // trình khác (Doanh trại/Nhà Cung/Tu viện) tra theo BUILDING_PRODUCTION.
+  const producedType: UnitType | undefined =
+    buildingRole === "castle" ? CASTLE_PRODUCES : BUILDING_PRODUCTION[buildingRole as keyof typeof BUILDING_PRODUCTION];
 
   return (
     <div className="w-full mx-auto" style={{ maxWidth: 900 }}>
@@ -364,28 +377,27 @@ export default function GameCanvas({
               </div>
 
               <div className="grid grid-cols-2 gap-1.5">
-                {(buildingRole === "castle" || buildingRole === "barracks") &&
-                  (Object.keys(UNIT_CONFIGS) as UnitType[]).map((type) => {
-                    const cfg = UNIT_CONFIGS[type];
-                    const disabled = hud.gold < cfg.cost || !hud.opponentConnected || atCap;
+                {producedType &&
+                  (() => {
+                    const cfg = UNIT_CONFIGS[producedType];
+                    const disabled = !canAfford(hud, cfg.cost) || !hud.opponentConnected || atCap;
                     return (
                       <BuildCard
-                        key={type}
-                        img={`/assets/ui9/unit-${type}.png`}
+                        img={`/assets/ui9/unit-${producedType}.png`}
                         fallbackIcon="swords"
                         label={cfg.label}
                         cost={cfg.cost}
                         disabled={disabled}
-                        onClick={() => spawn(type)}
+                        onClick={() => spawn(producedType)}
                       />
                     );
-                  })}
+                  })()}
 
                 {buildingRole === "house1" && (
                   <BuildCard
                     fallbackIcon="hammer"
                     label="+ Dân"
-                    cost={VILLAGER_COST}
+                    cost={{ gold: VILLAGER_COST }}
                     disabled={hud.gold < VILLAGER_COST || !hud.opponentConnected || hud.villagers >= hud.villagerMax}
                     onClick={spawnVillager}
                   />
@@ -393,9 +405,6 @@ export default function GameCanvas({
 
                 {buildingRole === "tower" && (
                   <p className="text-[10px] text-white/60 py-1 col-span-2">Tự động bắn địch trong tầm — không sản xuất.</p>
-                )}
-                {buildingRole === "monastery" && (
-                  <p className="text-[10px] text-white/60 py-1 col-span-2">Công trình trang trí.</p>
                 )}
                 {buildingRole.startsWith("resource-") &&
                   (() => {
@@ -412,25 +421,25 @@ export default function GameCanvas({
                       <BuildCard
                         fallbackIcon="hammer"
                         label={`Nhà ${RESOURCE_LABEL[kind]}`}
-                        cost={RESOURCE_HOUSE_COST}
+                        cost={{ gold: RESOURCE_HOUSE_COST }}
                         disabled={hud.gold < RESOURCE_HOUSE_COST}
                         onClick={() => buildResourceHouse(kind)}
                       />
                     );
                   })()}
 
-                {(buildingRole === "castle" || buildingRole === "barracks") && (
+                {producedType && (
                   <BuildCard
                     img="/assets/buildings/House1_Blue.png"
                     fallbackIcon="hammer"
                     label="Xây nhà"
-                    cost={HOUSE_COST}
+                    cost={{ gold: HOUSE_COST }}
                     disabled={hud.gold < HOUSE_COST || !hud.opponentConnected || hud.houses >= hud.housesMax}
                     onClick={buildHouse}
                   />
                 )}
               </div>
-              {atCap && (buildingRole === "castle" || buildingRole === "barracks") && (
+              {atCap && producedType && (
                 <p className="text-[9px] text-amber-400/90 mt-1">Hết chỗ quân — xây nhà hoặc khai thác thêm tài nguyên.</p>
               )}
             </div>
@@ -449,7 +458,8 @@ export default function GameCanvas({
   );
 }
 
-/** 1 ô/card building trong build menu — mờ + không bấm được nếu chưa đủ điều kiện, vẫn thấy sprite thật */
+/** 1 ô/card building trong build menu — mờ + không bấm được nếu chưa đủ điều kiện, vẫn thấy sprite thật.
+ * `cost` có thể gồm nhiều loại tài nguyên (vd Cung thủ tốn cả vàng lẫn gỗ) — hiện đủ icon từng loại. */
 function BuildCard({
   img,
   fallbackIcon,
@@ -461,7 +471,7 @@ function BuildCard({
   img?: string;
   fallbackIcon: string;
   label: string;
-  cost: number;
+  cost: UnitCost;
   disabled: boolean;
   onClick: () => void;
 }) {
@@ -481,9 +491,13 @@ function BuildCard({
         <img src={icon(fallbackIcon)} className="w-6 h-6 object-contain" alt="" />
       )}
       <span className="text-[9px] font-semibold text-[#3a2c1a] leading-none text-center px-0.5">{label}</span>
-      <span className="text-[9px] font-bold text-amber-800 flex items-center gap-0.5">
-        <img src={icon("gold")} className="w-2.5 h-2.5" alt="" />
-        {cost}
+      <span className="text-[9px] font-bold text-amber-800 flex items-center gap-1">
+        {(Object.entries(cost) as [ResourceKind, number][]).map(([kind, amount]) => (
+          <span key={kind} className="flex items-center gap-0.5">
+            <img src={icon(kind === "gold" ? "gold" : kind === "wood" ? "wood" : "meat")} className="w-2.5 h-2.5" alt="" />
+            {amount}
+          </span>
+        ))}
       </span>
     </button>
   );

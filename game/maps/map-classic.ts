@@ -9,7 +9,7 @@ export const MAP_CLASSIC: MapPreset = {
   worldW: 1280,
   worldH: 640,
   grassTexture: "grass_tile",
-  buildings: ["tower", "barracks"],
+  buildings: ["tower", "barracks", "archery"],
   baseLeft: { x: 150, y: 260, facingDir: -1 },
   baseRight: { x: 1100, y: 420, facingDir: 1 },
   waterBodies: [

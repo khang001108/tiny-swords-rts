@@ -188,10 +188,12 @@ export class BotOpponent implements OpponentLink {
 
   private maybeSpawn() {
     if (this.ended || this.units.size >= this.popCap) return;
-    const types = Object.values(UNIT_CONFIGS).filter((c) => c.cost <= this.gold && c.role !== "heal");
+    // Bot không có dân/kinh tế gỗ-thịt thật (chỉ vàng, được bù thêm gold/s để cân bằng — xem
+    // start()) nên chỉ so phần VÀNG trong cost, coi như luôn có sẵn gỗ/thịt cần thiết.
+    const types = Object.values(UNIT_CONFIGS).filter((c) => (c.cost.gold ?? 0) <= this.gold && c.role !== "heal");
     if (!types.length) return;
     const cfg = types[Math.floor(Math.random() * types.length)];
-    this.gold -= cfg.cost;
+    this.gold -= cfg.cost.gold ?? 0;
     const id = `${this.playerId}-${this.unitCounter++}`;
     const facing = this.preset.baseRight.facingDir;
     this.units.set(id, {

@@ -10,7 +10,7 @@ export const MAP_PLAINS: MapPreset = {
   worldW: 1700,
   worldH: 760,
   grassTexture: "grass_tile_large",
-  buildings: ["tower", "barracks"],
+  buildings: ["tower", "barracks", "archery"],
   baseLeft: { x: 180, y: 380, facingDir: -1 },
   baseRight: { x: 1480, y: 280, facingDir: 1 },
   waterBodies: [

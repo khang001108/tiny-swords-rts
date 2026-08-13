@@ -9,7 +9,7 @@ export const MAP_STRONGHOLD: MapPreset = {
   worldW: 1400,
   worldH: 700,
   grassTexture: "grass_tile",
-  buildings: ["tower", "barracks", "house1", "monastery"],
+  buildings: ["tower", "barracks", "archery", "house1", "monastery"],
   baseLeft: { x: 220, y: 230, facingDir: -1 },
   baseRight: { x: 1180, y: 520, facingDir: 1 },
   waterBodies: [

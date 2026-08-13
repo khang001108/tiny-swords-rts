@@ -26,7 +26,7 @@ export interface PauseState {
   paused: boolean;
 }
 
-export type BuildingRole = "castle" | "barracks" | "tower" | "house1" | "monastery" | `resource-${ResourceKind}`;
+export type BuildingRole = "castle" | "barracks" | "archery" | "tower" | "house1" | "monastery" | `resource-${ResourceKind}`;
 
 export interface BuildingSelection {
   role: BuildingRole;

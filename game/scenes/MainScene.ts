@@ -64,6 +64,9 @@ interface LocalUnit {
   lastAnimState: "walk" | "attack";
   lastAttackAt: number;
   manualTarget: { x: number; y: number } | null;
+  /** Lệnh "tấn công" (tách khỏi "di chuyển") — khoá đúng 1 lính địch cụ thể, ưu tiên hơn hẳn
+   *  kiểu tự chọn "địch gần nhất". Tự xoá khi mục tiêu chết/biến mất. */
+  attackTargetId: string | null;
   path: { x: number; y: number }[] | null;
   pathIndex: number;
   pathTargetKey: string;
@@ -136,6 +139,7 @@ export default class MainScene extends Phaser.Scene {
   private selected: { kind: "unit" | "villager"; id: string }[] = [];
   private selectionRing!: Phaser.GameObjects.Graphics;
   private buildingRing!: Phaser.GameObjects.Graphics;
+  private attackRing!: Phaser.GameObjects.Graphics;
   private selectedBuildingPos: { x: number; y: number } | null = null;
   private dragStart: { x: number; y: number } | null = null;
   private dragStartScreen: { x: number; y: number } | null = null;
@@ -325,6 +329,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.selectionRing = this.add.graphics().setDepth(12);
     this.buildingRing = this.add.graphics().setDepth(12);
+    this.attackRing = this.add.graphics().setDepth(12);
     this.dragBoxG = this.add.graphics().setDepth(13);
     this.input.addPointer(2); // cho phép theo dõi 2 ngón tay cùng lúc để pinch-zoom
     this.input.on("pointerdown", this.handlePointerDown, this);
@@ -1154,8 +1159,16 @@ export default class MainScene extends Phaser.Scene {
         return;
       }
       if (kind === "enemy" && this.selected.length > 0) {
-        const obj = hit as unknown as { x: number; y: number };
-        this.issueMoveCommand(obj.x, obj.y);
+        // Bấm ĐÚNG 1 lính địch cụ thể → lệnh "tấn công" (khoá mục tiêu, đuổi theo, ưu tiên
+        // tuyệt đối). Bấm lâu đài địch (không có remoteUnitId) → vẫn chỉ là lệnh "di chuyển"
+        // tới đó như cũ, căn cứ tự bị đánh khi vào tầm, không cần khoá mục tiêu.
+        const remoteUnitId = hit.getData("remoteUnitId") as string | undefined;
+        if (remoteUnitId) {
+          this.issueAttackCommand(remoteUnitId);
+        } else {
+          const obj = hit as unknown as { x: number; y: number };
+          this.issueMoveCommand(obj.x, obj.y);
+        }
         return;
       }
       if (kind === "my-building") {
@@ -1208,27 +1221,46 @@ export default class MainScene extends Phaser.Scene {
       const ty = Phaser.Math.Clamp(cy + Math.sin(angle) * spread, 15, this.preset.worldH - 15);
       if (s.kind === "unit") {
         const u = this.localUnits.get(s.id);
-        if (u) u.manualTarget = { x: tx, y: ty };
+        if (u) {
+          u.manualTarget = { x: tx, y: ty };
+          u.attackTargetId = null; // lệnh "di chuyển" luôn huỷ lệnh "tấn công" đang khoá (2 lệnh tách biệt)
+        }
       } else {
         this.myVillagers?.commandMove(s.id, tx, ty);
       }
     });
   }
 
+  /** Lệnh "tấn công" — khoá đúng 1 lính địch cụ thể cho các quân đang chọn, tách biệt hẳn khỏi
+   *  lệnh "di chuyển" (không dùng manualTarget: đường đi tự đuổi theo vị trí sống của mục tiêu). */
+  private issueAttackCommand(targetId: string) {
+    if (!this.selected.length) return;
+    for (const s of this.selected) {
+      if (s.kind !== "unit") continue;
+      const u = this.localUnits.get(s.id);
+      if (!u) continue;
+      u.attackTargetId = targetId;
+      u.manualTarget = null;
+    }
+  }
+
   private drawSelectionRing() {
     this.selectionRing.clear();
     this.buildingRing.clear();
+    this.attackRing.clear();
     if (this.selectedBuildingPos) {
       this.drawCornerBrackets(this.buildingRing, this.selectedBuildingPos.x, this.selectedBuildingPos.y, 46, 0xfacc15);
     }
     if (!this.selected.length) return;
     const stillAlive: { kind: "unit" | "villager"; id: string }[] = [];
+    const lockedTargetIds = new Set<string>();
     this.selectionRing.lineStyle(2, 0xffffff, 0.85);
     for (const s of this.selected) {
       let pos: { x: number; y: number } | null = null;
       if (s.kind === "unit") {
         const u = this.localUnits.get(s.id);
         pos = u ? { x: u.x, y: u.y } : null;
+        if (u?.attackTargetId) lockedTargetIds.add(u.attackTargetId);
       } else {
         pos = this.myVillagers?.getPos(s.id) ?? null;
       }
@@ -1238,6 +1270,13 @@ export default class MainScene extends Phaser.Scene {
       }
     }
     this.selected = stillAlive;
+
+    // Vòng đỏ đánh dấu mục tiêu đang bị khoá tấn công — tách biệt hẳn với vòng chọn quân (trắng)
+    this.attackRing.lineStyle(2.5, 0xef4444, 0.9);
+    for (const id of lockedTargetIds) {
+      const ru = this.remoteUnits.get(id);
+      if (ru) this.attackRing.strokeCircle(ru.sprite.x, ru.sprite.y, 26);
+    }
   }
 
   /** Vẽ 4 góc đánh dấu quanh 1 điểm — kiểu "selection corners" chuẩn RTS thay vì khung chữ nhật kín */
@@ -1365,8 +1404,10 @@ export default class MainScene extends Phaser.Scene {
     if (this.gameOver || !this.opponentConnected) return;
     if (this.localUnits.size >= this.popCap) return;
     const cfg = UNIT_CONFIGS[type];
-    if (this.gold < cfg.cost) return;
-    this.gold -= cfg.cost;
+    if (this.gold < (cfg.cost.gold ?? 0) || this.wood < (cfg.cost.wood ?? 0) || this.meat < (cfg.cost.meat ?? 0)) return;
+    this.gold -= cfg.cost.gold ?? 0;
+    this.wood -= cfg.cost.wood ?? 0;
+    this.meat -= cfg.cost.meat ?? 0;
     this.emitHud();
 
     const id = `${this.sync.playerId}-${this.unitCounter++}`;
@@ -1399,6 +1440,7 @@ export default class MainScene extends Phaser.Scene {
       lastAnimState: "walk",
       lastAttackAt: 0,
       manualTarget: null,
+      attackTargetId: null,
       path: null,
       pathIndex: 0,
       pathTargetKey: "",
@@ -1425,6 +1467,7 @@ export default class MainScene extends Phaser.Scene {
         sprite.play(`${spriteKey}-walk`);
         sprite.setInteractive({ cursor: "pointer" });
         sprite.setData("kind", "enemy");
+        sprite.setData("remoteUnitId", u.id);
         const hpBar = this.add.graphics().setDepth(11);
         ru = {
           sprite,
@@ -1514,7 +1557,13 @@ export default class MainScene extends Phaser.Scene {
             actionTargetId = oid;
           }
         }
+      } else if (u.attackTargetId && this.remoteUnits.has(u.attackTargetId)) {
+        // Lệnh "tấn công" đang khoá 1 mục tiêu cụ thể — ưu tiên tuyệt đối, bỏ qua "địch gần nhất"
+        const locked = this.remoteUnits.get(u.attackTargetId)!;
+        actionTargetId = u.attackTargetId;
+        actionDist = Phaser.Math.Distance.Between(u.x, u.y, locked.sprite.x, locked.sprite.y);
       } else {
+        if (u.attackTargetId) u.attackTargetId = null; // mục tiêu đã chết/biến mất — mở khoá, quay lại tự chọn
         for (const [rid, ru] of this.remoteUnits) {
           const d = Phaser.Math.Distance.Between(u.x, u.y, ru.sprite.x, ru.sprite.y);
           if (d < actionDist) {
@@ -1557,9 +1606,12 @@ export default class MainScene extends Phaser.Scene {
           u.lastAnimState = "walk";
           u.sprite.play(`${u.spriteKey}-walk`, true);
         }
-        const finalX = u.manualTarget ? u.manualTarget.x : this.enemyBasePos.x;
-        const finalY = u.manualTarget ? u.manualTarget.y : this.enemyBasePos.y;
-        this.followPath(u, finalX, finalY, cfg.speed, dt, !!u.manualTarget);
+        // Đang khoá tấn công 1 mục tiêu cụ thể → đuổi theo vị trí SỐNG của nó (không phải điểm
+        // cố định) — ưu tiên hơn cả manualTarget vì đây là lệnh "tấn công" đang có hiệu lực.
+        const chaseTarget = u.attackTargetId ? this.remoteUnits.get(u.attackTargetId) : null;
+        const finalX = chaseTarget ? chaseTarget.sprite.x : u.manualTarget ? u.manualTarget.x : this.enemyBasePos.x;
+        const finalY = chaseTarget ? chaseTarget.sprite.y : u.manualTarget ? u.manualTarget.y : this.enemyBasePos.y;
+        this.followPath(u, finalX, finalY, cfg.speed, dt, !!(u.manualTarget || chaseTarget));
         u.x = Phaser.Math.Clamp(u.x, 20, this.preset.worldW - 20);
         u.y = Phaser.Math.Clamp(u.y, 20, this.preset.worldH - 20);
       }

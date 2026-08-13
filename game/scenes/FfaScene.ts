@@ -255,8 +255,8 @@ export default class FfaScene extends Phaser.Scene {
     const base = this.bases[0];
     const cfg = UNIT_CONFIGS[type];
     const myCount = Array.from(this.units.values()).filter((u) => u.owner === 0 && u.state !== "dead").length;
-    if (myCount >= FFA_POP_CAP || this.gold < cfg.cost) return;
-    this.gold -= cfg.cost;
+    if (myCount >= FFA_POP_CAP || this.gold < (cfg.cost.gold ?? 0)) return;
+    this.gold -= cfg.cost.gold ?? 0;
     this.spawnUnit(0, this.playerColor, type, base.x + Phaser.Math.Between(-30, 30), base.y + Phaser.Math.Between(20, 50));
     this.emitHud();
   }
@@ -336,10 +336,10 @@ export default class FfaScene extends Phaser.Scene {
       if (this.units.size > 400) break; // an toàn, tránh nổ bộ nhớ nếu treo lâu
       if (time - base.lastSpawnAt >= base.spawnEveryMs) {
         const count = Array.from(this.units.values()).filter((u) => u.owner === base.owner && u.state !== "dead").length;
-        const affordable = FFA_UNIT_TYPES.filter((t) => UNIT_CONFIGS[t].cost <= base.gold);
+        const affordable = FFA_UNIT_TYPES.filter((t) => (UNIT_CONFIGS[t].cost.gold ?? 0) <= base.gold);
         if (count < FFA_BOT_POP_CAP && affordable.length) {
           const type = affordable[Math.floor(Math.random() * affordable.length)];
-          base.gold -= UNIT_CONFIGS[type].cost;
+          base.gold -= UNIT_CONFIGS[type].cost.gold ?? 0;
           this.spawnUnit(base.owner, base.color, type, base.x + Phaser.Math.Between(-30, 30), base.y + Phaser.Math.Between(20, 50));
         }
         base.lastSpawnAt = time;

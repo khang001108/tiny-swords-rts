@@ -1,7 +1,7 @@
 import type { ResourceKind } from "@/game/entities";
 
 export type MapId = "classic" | "canyon" | "plains" | "stronghold";
-export type BuildingKey = "tower" | "barracks" | "house1" | "monastery";
+export type BuildingKey = "tower" | "barracks" | "archery" | "house1" | "monastery";
 
 /** Vị trí + hướng của 1 căn cứ — đặt tay bởi tác giả map, không suy ra bằng công thức
  *  đối xứng, nên `baseLeft`/`baseRight` không cần cùng hàng hay cách đều 2 mép map. */

@@ -1,9 +1,12 @@
 export type UnitType = "pawn" | "warrior" | "archer" | "monk";
 
+/** Chi phí tuyển 1 lính — mỗi loại tài nguyên góp 1 phần (thiếu key = không cần loại đó) */
+export type UnitCost = Partial<Record<ResourceKind, number>>;
+
 export interface UnitConfig {
   key: UnitType;
   label: string;
-  cost: number;
+  cost: UnitCost;
   hp: number;
   damage: number;
   speed: number; // px/s
@@ -18,7 +21,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   pawn: {
     key: "pawn",
     label: "Lính thường",
-    cost: 20,
+    cost: { gold: 15, meat: 10 },
     hp: 60,
     damage: 6,
     speed: 45,
@@ -29,7 +32,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   warrior: {
     key: "warrior",
     label: "Chiến binh",
-    cost: 45,
+    cost: { gold: 25, meat: 25 },
     hp: 150,
     damage: 15,
     speed: 38,
@@ -40,7 +43,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   archer: {
     key: "archer",
     label: "Cung thủ",
-    cost: 35,
+    cost: { gold: 15, wood: 25 },
     hp: 55,
     damage: 10,
     speed: 42,
@@ -51,7 +54,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   monk: {
     key: "monk",
     label: "Thầy tu",
-    cost: 40,
+    cost: { gold: 40 },
     hp: 50,
     damage: 0,
     speed: 40,
@@ -96,9 +99,19 @@ export interface BuildingVisual {
 export const BUILDING_VISUALS: BuildingVisual[] = [
   { key: "tower", file: "Tower", scale: 0.42, offsetX: -60, offsetY: -70 },
   { key: "barracks", file: "Barracks", scale: 0.4, offsetX: -70, offsetY: 60 },
+  { key: "archery", file: "Archery", scale: 0.4, offsetX: -110, offsetY: -10 },
   { key: "house1", file: "House1", scale: 0.4, offsetX: 55, offsetY: 75 },
   { key: "monastery", file: "Monastery", scale: 0.36, offsetX: 70, offsetY: -55 },
 ];
+
+/** Mỗi công trình ra ĐÚNG 1 loại lính riêng — Lâu đài (không nằm trong BuildingKey, luôn có
+ *  sẵn) ra Lính thường; Tháp canh không sản xuất gì (tự động phòng thủ). */
+export const BUILDING_PRODUCTION: Partial<Record<BuildingKey, UnitType>> = {
+  barracks: "warrior",
+  archery: "archer",
+  monastery: "monk",
+};
+export const CASTLE_PRODUCES: UnitType = "pawn";
 
 /** Bố cục animation trong spritesheet: hàng nào là idle/walk/attack, mỗi hàng bao nhiêu frame */
 export interface AnimLayout {
