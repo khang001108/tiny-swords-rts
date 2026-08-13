@@ -1,10 +1,10 @@
-import { MapPreset, MapId, BuildingKey } from "./types";
+import { MapPreset, MapId, BuildingKey, BaseSpec, WaterBand } from "./types";
 import { MAP_CLASSIC } from "./map-classic";
 import { MAP_CANYON } from "./map-canyon";
 import { MAP_PLAINS } from "./map-plains";
 import { MAP_STRONGHOLD } from "./map-stronghold";
 
-export type { MapPreset, MapId, BuildingKey };
+export type { MapPreset, MapId, BuildingKey, BaseSpec, WaterBand };
 
 /**
  * Đăng ký toàn bộ map ở đây. Thêm map mới (vd MAP_002):

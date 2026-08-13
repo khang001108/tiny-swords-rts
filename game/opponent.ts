@@ -81,11 +81,10 @@ export class BotOpponent implements OpponentLink {
   private curSpawnMs: number;
   private statMult = 1;
 
-  private readonly leftBaseX: number;
-  private readonly rightBaseX: number;
-  private readonly midY: number;
-  private readonly laneYMin: number;
-  private readonly laneYMax: number;
+  // Bot luôn là "right" (quy ước có sẵn) — đọc thẳng vị trí base thật do map tự đặt, không còn
+  // suy từ công thức baseMargin đối xứng.
+  private readonly myBase: { x: number; y: number };
+  private readonly enemyBase: { x: number; y: number };
   private readonly popCap: number;
 
   constructor(
@@ -95,11 +94,8 @@ export class BotOpponent implements OpponentLink {
     private onWaveChange?: (wave: number) => void,
     private navGrid: NavGrid | null = null
   ) {
-    this.leftBaseX = preset.baseMargin;
-    this.rightBaseX = preset.worldW - preset.baseMargin;
-    this.midY = preset.worldH / 2;
-    this.laneYMin = preset.laneYMin;
-    this.laneYMax = preset.laneYMax;
+    this.myBase = { x: preset.baseRight.x, y: preset.baseRight.y };
+    this.enemyBase = { x: preset.baseLeft.x, y: preset.baseLeft.y };
     this.popCap = endless ? 40 : BASE_POP_CAP + preset.buildings.length * POP_CAP_PER_BUILDING;
     this.curSpawnMs = this.difficulty === "hard" ? 1100 : this.difficulty === "easy" ? 2200 : 1600;
   }
@@ -197,11 +193,12 @@ export class BotOpponent implements OpponentLink {
     const cfg = types[Math.floor(Math.random() * types.length)];
     this.gold -= cfg.cost;
     const id = `${this.playerId}-${this.unitCounter++}`;
+    const facing = this.preset.baseRight.facingDir;
     this.units.set(id, {
       id,
       type: cfg.key,
-      x: this.rightBaseX - 60,
-      y: this.laneYMin + Math.random() * (this.laneYMax - this.laneYMin),
+      x: this.myBase.x - facing * 60,
+      y: this.myBase.y + (Math.random() * 100 - 50),
       hp: Math.round(cfg.hp * this.statMult),
       maxHp: Math.round(cfg.hp * this.statMult),
       state: "search",
@@ -226,10 +223,10 @@ export class BotOpponent implements OpponentLink {
         best = { id: hu.id, x: hu.x, y: hu.y, priority: TARGET_PRIORITY.enemyUnit };
       }
     }
-    const dBase = Math.hypot(this.leftBaseX - u.x, this.midY - u.y);
+    const dBase = Math.hypot(this.enemyBase.x - u.x, this.enemyBase.y - u.y);
     const baseScore = TARGET_PRIORITY.enemyBase - dBase * 0.05;
     if (baseScore > bestScore) {
-      best = { id: "base", x: this.leftBaseX, y: this.midY, priority: TARGET_PRIORITY.enemyBase };
+      best = { id: "base", x: this.enemyBase.x, y: this.enemyBase.y, priority: TARGET_PRIORITY.enemyBase };
     }
     return best;
   }
@@ -294,7 +291,7 @@ export class BotOpponent implements OpponentLink {
         // FIND_PATH + MOVE — đi theo đường A* thật, né sông/đồi/công trình thay vì lao thẳng
         u.state = "move";
         this.followPath(u, target.x, target.y, cfg.speed, dt);
-        u.x = Math.max(this.leftBaseX - 40, Math.min(this.rightBaseX + 40, u.x));
+        u.x = Math.max(20, Math.min(this.preset.worldW - 20, u.x));
         u.y = Math.max(20, Math.min(this.preset.worldH - 20, u.y));
       } else {
         u.state = "search"; // không tìm thấy mục tiêu nào (hiếm khi xảy ra vì luôn có base địch)
@@ -304,10 +301,10 @@ export class BotOpponent implements OpponentLink {
     // Tháp canh của bot tự bắn quân người chơi lại gần
     let towerTarget: UnitSnapshot | null = null;
     let towerDist = Infinity;
-    const towerX = this.rightBaseX - 60;
+    const towerX = this.myBase.x - this.preset.baseRight.facingDir * 60;
     for (const hu of this.humanUnits) {
       if (hu.hp <= 0) continue;
-      const d = Math.hypot(hu.x - towerX, hu.y - this.midY);
+      const d = Math.hypot(hu.x - towerX, hu.y - this.myBase.y);
       if (d < towerDist) {
         towerDist = d;
         towerTarget = hu;

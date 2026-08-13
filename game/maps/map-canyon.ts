@@ -1,32 +1,40 @@
 import { MapPreset } from "./types";
 
-/** Sông hẹp, đúng 1 cây cầu ngay giữa — không có đường vòng, không có mỏ trung lập để tranh. */
+/** Đèo núi thật — sông hẹp chạy dọc suốt bản đồ với ĐÚNG 1 cây cầu, đồi núi chốt 2 bên lối vào
+ * cầu buộc quân phải len qua khe hẹp thay vì đi thẳng. Không có mỏ trung lập — kinh tế phải
+ * tự lực hoàn toàn, mọi căng thẳng dồn vào đúng 1 điểm vượt sông. */
 export const MAP_CANYON: MapPreset = {
   id: "canyon",
   label: "Hẻm Núi",
   desc: "Sông hẹp, chỉ 1 cây cầu duy nhất — buộc đối đầu trực diện, không né được",
   worldW: 900,
   worldH: 560,
-  baseMargin: 90,
-  laneYMin: 190,
-  laneYMax: 470,
   grassTexture: "grass_tile_small",
-  treeSpacing: 66,
   buildings: ["tower"],
-  riverX: 450,
-  riverWidth: 50,
-  // Đúng giữa map (midY=280) — đây là điểm băng sông DUY NHẤT, không có cầu phụ để vòng tránh
-  bridgeYs: [280],
-  bridgeHeight: 80,
+  baseLeft: { x: 110, y: 210, facingDir: -1 },
+  baseRight: { x: 790, y: 370, facingDir: 1 },
+  waterBodies: [
+    {
+      xMin: 430,
+      xMax: 480,
+      yMin: 0,
+      yMax: 560,
+      orientation: "vertical",
+      // Đúng 1 cầu duy nhất — đây là điểm băng sông DUY NHẤT trên cả bản đồ
+      bridgeAt: [300],
+      bridgeGap: 95,
+    },
+  ],
+  // Đồi chốt 2 bên lối vào cầu — buộc phải vòng qua khe hẹp giữa các quả đồi mới tới được cầu
   hillSpecs: [
-    { x: 290, y: 180, scale: 0.55 },
-    { x: 610, y: 380, scale: 0.5 },
-    { x: 450, y: 480, scale: 0.45 },
+    { x: 330, y: 130, scale: 0.6 },
+    { x: 330, y: 460, scale: 0.55 },
+    { x: 590, y: 130, scale: 0.55 },
+    { x: 590, y: 460, scale: 0.6 },
   ],
   forestClusters: [
-    { x: 250, y: 420, count: 5, scale: 0.45 },
-    { x: 650, y: 150, count: 4, scale: 0.4 },
+    { x: 180, y: 420, count: 4, scale: 0.4 },
+    { x: 720, y: 150, count: 4, scale: 0.4 },
   ],
-  // Không có mỏ trung lập — kinh tế phải tự lực hoàn toàn, độ căng dồn hết vào cây cầu độc đạo
-  neutralResource: null,
+  neutralResources: [],
 };

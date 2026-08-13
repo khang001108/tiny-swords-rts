@@ -1,32 +1,38 @@
 import { MapPreset } from "./types";
 
-/** Chiến trường tiêu chuẩn — cân bằng mọi mặt, hợp cho trận đầu tiên. */
+/** Chiến trường tiêu chuẩn — vẫn cân bằng/gọn gàng như trước, nhưng 2 căn cứ không còn nằm
+ * đúng 1 hàng ngang, sông cũng lệch khỏi chính giữa: khác biệt nhẹ, hợp cho trận đầu tiên. */
 export const MAP_CLASSIC: MapPreset = {
   id: "classic",
   label: "Cổ Điển",
   desc: "Chiến trường tiêu chuẩn, 2 cầu, cân bằng mọi mặt",
   worldW: 1280,
   worldH: 640,
-  baseMargin: 110,
-  laneYMin: 220,
-  laneYMax: 560,
   grassTexture: "grass_tile",
-  treeSpacing: 78,
   buildings: ["tower", "barracks"],
-  riverX: 640,
-  riverWidth: 58,
-  // 2 cầu lệch rõ khỏi midY=320 theo 2 hướng ngược nhau — có route "vòng trên" và "vòng dưới" thật sự
-  bridgeYs: [255, 520],
-  bridgeHeight: 72,
+  baseLeft: { x: 150, y: 260, facingDir: -1 },
+  baseRight: { x: 1100, y: 420, facingDir: 1 },
+  waterBodies: [
+    {
+      xMin: 580,
+      xMax: 640,
+      yMin: 0,
+      yMax: 640,
+      orientation: "vertical",
+      // 2 cầu lệch rõ khỏi đường thẳng nối 2 base — buộc đi vòng thay vì băng thẳng qua sông
+      bridgeAt: [220, 470],
+      bridgeGap: 72,
+    },
+  ],
   hillSpecs: [
-    { x: 420, y: 260, scale: 0.6 },
-    { x: 860, y: 500, scale: 0.6 },
-    { x: 740, y: 235, scale: 0.42 },
+    { x: 420, y: 150, scale: 0.55 },
+    { x: 900, y: 520, scale: 0.5 },
+    { x: 760, y: 180, scale: 0.4 },
   ],
   forestClusters: [
-    { x: 520, y: 420, count: 5, scale: 0.45 },
-    { x: 300, y: 480, count: 4, scale: 0.4 },
-    { x: 980, y: 250, count: 4, scale: 0.4 },
+    { x: 300, y: 500, count: 5, scale: 0.45 },
+    { x: 950, y: 200, count: 4, scale: 0.4 },
+    { x: 980, y: 480, count: 4, scale: 0.4 },
   ],
-  neutralResource: { x: 729, y: 320 },
+  neutralResources: [{ x: 660, y: 340, kind: "gold" }],
 };

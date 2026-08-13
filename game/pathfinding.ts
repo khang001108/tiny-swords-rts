@@ -1,3 +1,5 @@
+import type { WaterBand } from "@/game/maps/types";
+
 export interface NavGrid {
   cols: number;
   rows: number;
@@ -13,11 +15,14 @@ export interface CircleObstacle {
   r: number;
 }
 
-export interface RiverSpec {
-  xMin: number;
-  xMax: number;
-  bridgeYs: number[];
-  bridgeHalfHeight: number;
+/** Ô (cx,cy) có nằm trong dải nước này không, và có phải đúng chỗ có cầu để đi qua không */
+function isInWaterBand(band: WaterBand, cx: number, cy: number, cellSize: number): boolean {
+  const pad = 6;
+  if (cx < band.xMin - pad || cx > band.xMax + pad || cy < band.yMin - pad || cy > band.yMax + pad) return false;
+  if (band.orientation === "vertical") {
+    return !band.bridgeAt.some((by) => Math.abs(cy - by) <= band.bridgeGap / 2 + cellSize / 2);
+  }
+  return !band.bridgeAt.some((bx) => Math.abs(cx - bx) <= band.bridgeGap / 2 + cellSize / 2);
 }
 
 /** Dựng lưới ô vuông đánh dấu ô nào đi được — gọi 1 lần khi vào trận, dùng lại cho mọi lần tìm đường. */
@@ -26,7 +31,7 @@ export function buildNavGrid(
   worldH: number,
   cellSize: number,
   obstacles: CircleObstacle[],
-  river: RiverSpec | null
+  waterBodies: WaterBand[]
 ): NavGrid {
   const cols = Math.ceil(worldW / cellSize);
   const rows = Math.ceil(worldH / cellSize);
@@ -38,9 +43,11 @@ export function buildNavGrid(
       const cy = r * cellSize + cellSize / 2;
       let isBlocked = false;
 
-      if (river && cx > river.xMin - 6 && cx < river.xMax + 6) {
-        const nearBridge = river.bridgeYs.some((by) => Math.abs(cy - by) <= river.bridgeHalfHeight / 2 + cellSize / 2);
-        if (!nearBridge) isBlocked = true;
+      for (const band of waterBodies) {
+        if (isInWaterBand(band, cx, cy, cellSize)) {
+          isBlocked = true;
+          break;
+        }
       }
       if (!isBlocked) {
         for (const o of obstacles) {

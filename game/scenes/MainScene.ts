@@ -26,6 +26,7 @@ import {
   MAP_PRESETS,
   MapPreset,
   MapId,
+  WaterBand,
   computePopCap,
   RESOURCE_NODE_LAYOUT,
   ResourceKind,
@@ -100,6 +101,10 @@ export default class MainScene extends Phaser.Scene {
 
   private myVillagers: VillagerSystem | null = null;
   private myBasePos = { x: 0, y: 0 };
+  private enemyBasePos = { x: 0, y: 0 };
+  /** Dấu lệch cụm công trình/tài nguyên của base MÌNH — đọc từ BaseSpec do map tự chọn, không
+   *  còn suy từ mySide==="left" (2 base không cần đối xứng nhau nữa). */
+  private myFacingDir: 1 | -1 = -1;
   private myNodePosSaved: NodePositions | null = null;
   private housesBuilt = 0;
   private resourceHouses: Record<ResourceKind, boolean> = { wood: false, gold: false, meat: false };
@@ -143,8 +148,7 @@ export default class MainScene extends Phaser.Scene {
   private dragBoxG!: Phaser.GameObjects.Graphics;
   private myResourceNodes: { kind: ResourceKind; x: number; y: number; obj: Phaser.GameObjects.GameObject }[] = [];
 
-  private riverBand: { xMin: number; xMax: number } | null = null;
-  private bridges: { y: number }[] = [];
+  private waterBands: WaterBand[] = [];
   private hillObstacles: { x: number; y: number; r: number }[] = [];
   private hillPlateaus: { x: number; y: number; r: number }[] = [];
   private navGrid: NavGrid | null = null;
@@ -432,15 +436,7 @@ export default class MainScene extends Phaser.Scene {
     // lâu đài/tháp canh của địch vì navGrid không hề biết công trình địch nằm ở đâu.
     for (const p of this.myBuildingPositions) obstacles.push({ x: p.x, y: p.y, r: 42 });
     for (const p of this.enemyBuildingPositions) obstacles.push({ x: p.x, y: p.y, r: 42 });
-    const river = this.riverBand
-      ? {
-          xMin: this.riverBand.xMin,
-          xMax: this.riverBand.xMax,
-          bridgeYs: this.bridges.map((b) => b.y),
-          bridgeHalfHeight: this.preset.bridgeHeight,
-        }
-      : null;
-    this.navGrid = buildNavGrid(this.preset.worldW, this.preset.worldH, 28, obstacles, river);
+    this.navGrid = buildNavGrid(this.preset.worldW, this.preset.worldH, 28, obstacles, this.preset.waterBodies);
   }
 
   /**
@@ -485,43 +481,48 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private layoutBases() {
-    const myX = this.mySide === "left" ? this.preset.baseMargin : this.preset.worldW - this.preset.baseMargin;
-    const enemyX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
-    const midY = this.preset.worldH / 2;
-    this.myBasePos = { x: myX, y: midY };
-    this.myBuildingPositions.push({ x: myX, y: midY });
-    this.enemyBuildingPositions.push({ x: enemyX, y: midY });
-    this.myCastle.setPosition(myX, midY);
-    this.enemyCastle.setPosition(enemyX, midY);
-    this.myCastle.setDepth(this.yDepth(midY));
-    this.enemyCastle.setDepth(this.yDepth(midY));
+    const myBaseSpec = this.mySide === "left" ? this.preset.baseLeft : this.preset.baseRight;
+    const enemyBaseSpec = this.mySide === "left" ? this.preset.baseRight : this.preset.baseLeft;
+    const myX = myBaseSpec.x;
+    const myY = myBaseSpec.y;
+    const enemyX = enemyBaseSpec.x;
+    const enemyY = enemyBaseSpec.y;
+    this.myFacingDir = myBaseSpec.facingDir;
+    this.myBasePos = { x: myX, y: myY };
+    this.enemyBasePos = { x: enemyX, y: enemyY };
+    this.myBuildingPositions.push({ x: myX, y: myY });
+    this.enemyBuildingPositions.push({ x: enemyX, y: enemyY });
+    this.myCastle.setPosition(myX, myY);
+    this.enemyCastle.setPosition(enemyX, enemyY);
+    this.myCastle.setDepth(this.yDepth(myY));
+    this.enemyCastle.setDepth(this.yDepth(enemyY));
     this.enemyCastle.setFlipX(this.mySide === "right");
     this.myCastle.setFlipX(this.mySide === "left");
 
     // Vùng lãnh thổ mờ dưới chân base
     const territory = this.add.graphics().setDepth(1);
     territory.fillStyle(0x3b82f6, 0.12);
-    territory.fillEllipse(myX, midY + 10, 300, 190);
+    territory.fillEllipse(myX, myY + 10, 300, 190);
     territory.fillStyle(0xef4444, 0.12);
-    territory.fillEllipse(enemyX, midY + 10, 300, 190);
+    territory.fillEllipse(enemyX, enemyY + 10, 300, 190);
 
     // Bóng đổ dưới base
     const shadow = this.add.graphics().setDepth(4);
     shadow.fillStyle(0x000000, 0.25);
-    shadow.fillEllipse(myX, midY + 70, 130, 24);
-    shadow.fillEllipse(enemyX, midY + 70, 130, 24);
+    shadow.fillEllipse(myX, myY + 70, 130, 24);
+    shadow.fillEllipse(enemyX, enemyY + 70, 130, 24);
 
-    // Cờ hiệu 2 bên base
-    const dirMine = this.mySide === "left" ? -1 : 1;
-    const dirEnemy = -dirMine;
-    const myFlag = this.add.image(myX + dirMine * 95, midY - 40, "banner").setScale(0.35).setDepth(5);
+    // Cờ hiệu 2 bên base — mỗi base tự chọn dấu lệch (facingDir), không còn suy từ mySide
+    const dirMine = myBaseSpec.facingDir;
+    const dirEnemy = enemyBaseSpec.facingDir;
+    const myFlag = this.add.image(myX + dirMine * 95, myY - 40, "banner").setScale(0.35).setDepth(5);
     myFlag.setTint(0x60a5fa);
-    const enemyFlag = this.add.image(enemyX + dirEnemy * 95, midY - 40, "banner").setScale(0.35).setDepth(5);
+    const enemyFlag = this.add.image(enemyX + dirEnemy * 95, enemyY - 40, "banner").setScale(0.35).setDepth(5);
     enemyFlag.setTint(0xf87171);
 
     // Mỏ vàng trang trí sau base
-    this.add.image(myX, midY + 95, "goldmine").setScale(0.5).setDepth(4);
-    this.add.image(enemyX, midY + 95, "goldmine").setScale(0.5).setDepth(4);
+    this.add.image(myX, myY + 95, "goldmine").setScale(0.5).setDepth(4);
+    this.add.image(enemyX, enemyY + 95, "goldmine").setScale(0.5).setDepth(4);
 
     // Cụm công trình quanh base — quyết định bởi kích thước bản đồ
     for (const b of this.preset.buildings) {
@@ -529,17 +530,18 @@ export default class MainScene extends Phaser.Scene {
       if (!visual) continue;
       const myBx = myX + dirMine * visual.offsetX;
       const enemyBx = enemyX + dirEnemy * visual.offsetX;
-      const by = midY + visual.offsetY;
-      const myImg = this.add.image(myBx, by, `bld_${b}_blue`).setScale(visual.scale).setDepth(this.yDepth(by));
-      this.add.image(enemyBx, by, `bld_${b}_red`).setScale(visual.scale).setDepth(this.yDepth(by));
+      const myBy = myY + visual.offsetY;
+      const enemyBy = enemyY + visual.offsetY;
+      const myImg = this.add.image(myBx, myBy, `bld_${b}_blue`).setScale(visual.scale).setDepth(this.yDepth(myBy));
+      this.add.image(enemyBx, enemyBy, `bld_${b}_red`).setScale(visual.scale).setDepth(this.yDepth(enemyBy));
       myImg.setInteractive({ cursor: "pointer" });
       myImg.setData("kind", "my-building");
       myImg.setData("role", b);
-      this.myBuildingPositions.push({ x: myBx, y: by });
-      this.enemyBuildingPositions.push({ x: enemyBx, y: by });
+      this.myBuildingPositions.push({ x: myBx, y: myBy });
+      this.enemyBuildingPositions.push({ x: enemyBx, y: enemyBy });
 
       if (b === "tower") {
-        this.myTowerPos = { x: myBx, y: by };
+        this.myTowerPos = { x: myBx, y: myBy };
       }
     }
 
@@ -549,7 +551,7 @@ export default class MainScene extends Phaser.Scene {
       const jitterX = Phaser.Math.Between(-30, 30);
       const jitterY = Phaser.Math.Between(-25, 25);
       const nx = myX + dirMine * spec.offsetX + jitterX;
-      const ny = Phaser.Math.Clamp(midY + spec.offsetY + jitterY, this.preset.laneYMin - 80, this.preset.laneYMax + 80);
+      const ny = Phaser.Math.Clamp(myY + spec.offsetY + jitterY, 20, this.preset.worldH - 20);
       myNodePos[spec.kind] = { x: nx, y: ny };
       if (spec.kind === "gold") {
         const img = this.add.image(nx, ny, "res_gold").setScale(0.7).setDepth(this.yDepth(ny));
@@ -587,11 +589,11 @@ export default class MainScene extends Phaser.Scene {
     this.myVillagers = new VillagerSystem(
       this,
       this.mySide === "left" ? "blue" : "red",
-      { x: myX, y: midY },
+      { x: myX, y: myY },
       myNodePos,
       (kind, amount, useNeutral) => this.handleVillagerDeposit(kind, amount, useNeutral),
       null,
-      this.preset.neutralResource
+      this.preset.neutralResources[0] ?? null
     );
     (["wood", "gold", "meat"] as const).forEach((k) => this.myVillagers!.addVillager(k));
   }
@@ -759,7 +761,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private buildMap() {
-    const { worldW, worldH, laneYMin, laneYMax, grassTexture, treeSpacing } = this.preset;
+    const { worldW, worldH, grassTexture } = this.preset;
     this.cameras.main.setBackgroundColor("#2f4d2a");
 
     // Lớp 1 — biển bao quanh (chỉ lộ ra thành viền trên/dưới, đảo đất là lớp 2 nổi lên trên)
@@ -780,48 +782,22 @@ export default class MainScene extends Phaser.Scene {
     shore.lineBetween(0, seaRim - 2, worldW, seaRim - 2);
     shore.lineBetween(0, worldH - seaRim + 2, worldW, worldH - seaRim + 2);
 
-    const field = this.add.graphics().setDepth(0);
-    field.fillStyle(0x000000, 0.08);
-    field.fillRect(0, seaRim, worldW, laneYMin - 40 - seaRim);
-    field.fillRect(0, laneYMax + 40, worldW, worldH - seaRim - (laneYMax + 40));
-
-    const midLine = this.add.graphics().setDepth(2);
-    midLine.lineStyle(3, 0xffffff, 0.2);
-    midLine.lineBetween(worldW / 2, 40, worldW / 2, worldH - 40);
-    for (let y = 20; y < worldH - 10; y += 26) {
-      midLine.fillStyle(0xffffff, 0.12);
-      midLine.fillCircle(worldW / 2, y, 3);
-    }
-
-    const treeKeys = ["tree_a", "tree_b", "tree_c"];
-    const topY = seaRim + 8;
-    const bottomY = worldH - seaRim - 8;
-    let i = 0;
-    for (let x = -10; x < worldW + 40; x += treeSpacing) {
-      const key = treeKeys[i % treeKeys.length];
-      const jitter = i % 2 === 0 ? -6 : 6;
-      // Cả 2 hàng cây (trên/dưới) đều đứng thẳng bình thường — origin neo ở gốc cây (0.5, 0.85)
-      // để cây "đứng" đúng trên mặt đất. KHÔNG dùng setFlipY ở đây: lật dọc làm cây bị ngược
-      // (ngọn chúc xuống, gốc chổng lên) — đó chính là lỗi đã gặp trước đây.
-      this.add.image(x, topY + jitter, key).setScale(0.42).setDepth(3).setOrigin(0.5, 0.85);
-      this.add.image(x + treeSpacing / 2, bottomY + jitter, key).setScale(0.42).setDepth(3).setOrigin(0.5, 0.85);
-      i++;
-    }
-
+    // Bụi/đá/nấm trang trí rải ngẫu nhiên khắp bản đồ (không còn theo 1 dải "lane" cố định —
+    // địa hình giờ đến từ hillSpecs/forestClusters/waterBodies, không phải 2 hàng ngang song song).
     const decoKeys = ["deco_bush", "deco_bush2", "deco_rock", "deco_mushroom"];
-    let d = 0;
-    for (let x = 140; x < worldW - 100; x += 170) {
+    const decoCount = Math.max(6, Math.round((worldW * worldH) / 90000));
+    for (let d = 0; d < decoCount; d++) {
+      const x = Phaser.Math.Between(60, worldW - 60);
+      const y = Phaser.Math.Between(seaRim + 40, worldH - seaRim - 40);
       const key = decoKeys[d % decoKeys.length];
-      this.add.image(x, laneYMin - 55, key).setScale(0.6).setDepth(3).setAlpha(0.9);
-      this.add.image(x + 70, laneYMax + 45, decoKeys[(d + 1) % decoKeys.length]).setScale(0.6).setDepth(3).setAlpha(0.9);
-      d++;
+      this.add.image(x, y, key).setScale(0.55).setDepth(this.yDepth(y) - 0.5).setAlpha(0.9);
     }
 
     // Vài đảo nhỏ nổi ngoài biển (thuần trang trí) ở 2 góc — lớp "đất" phụ, tăng cảm giác quần đảo
     this.add.image(60, 6, "islet_flat").setScale(0.22).setDepth(1).setAlpha(0.95);
     this.add.image(worldW - 60, worldH - 6, "islet_flat").setScale(0.2).setDepth(1).setAlpha(0.95);
 
-    this.buildRiver();
+    this.buildWaterBodies();
     this.buildHills();
     this.buildClouds();
   }
@@ -849,35 +825,44 @@ export default class MainScene extends Phaser.Scene {
     }
   }
 
-  private buildRiver() {
-    const { riverX, riverWidth, bridgeYs, bridgeHeight, worldH } = this.preset;
-    const xMin = riverX - riverWidth / 2;
-    const xMax = riverX + riverWidth / 2;
-    this.riverBand = { xMin, xMax };
-    this.bridges = bridgeYs.map((y) => ({ y }));
+  /** Vẽ toàn bộ vùng nước của map — mỗi map có 0..n dải (`WaterBand`), ghép lại tạo sông/hồ/biển
+   *  hình dạng bất kỳ. Mỗi dải có thể chạy dọc hoặc ngang, cầu đặt dọc theo đúng trục của nó. */
+  private buildWaterBodies() {
+    this.waterBands = this.preset.waterBodies;
+    for (const band of this.waterBands) {
+      const { xMin, xMax, yMin, yMax, orientation, bridgeAt, bridgeGap } = band;
+      const w = xMax - xMin;
+      const h = yMax - yMin;
 
-    const water = this.add.tileSprite(xMin, 0, riverWidth, worldH, "water_tile").setOrigin(0, 0).setDepth(2);
-    water.setTileScale(1, 1);
+      const water = this.add.tileSprite(xMin, yMin, w, h, "water_tile").setOrigin(0, 0).setDepth(2);
+      water.setTileScale(1, 1);
 
-    const shore = this.add.graphics().setDepth(2);
-    shore.lineStyle(3, 0xbdf4f0, 0.55);
-    shore.lineBetween(xMin, 0, xMin, worldH);
-    shore.lineBetween(xMax, 0, xMax, worldH);
-    shore.lineStyle(1.5, 0x0e5f5a, 0.35);
-    shore.lineBetween(xMin - 2, 0, xMin - 2, worldH);
-    shore.lineBetween(xMax + 2, 0, xMax + 2, worldH);
+      const shore = this.add.graphics().setDepth(2);
+      shore.lineStyle(3, 0xbdf4f0, 0.55);
+      shore.strokeRect(xMin, yMin, w, h);
+      shore.lineStyle(1.5, 0x0e5f5a, 0.35);
+      shore.strokeRect(xMin - 2, yMin - 2, w + 4, h + 4);
 
-    for (const by of bridgeYs) {
-      const plank = this.add.graphics().setDepth(3);
-      const top = by - bridgeHeight / 2;
-      plank.fillStyle(0x8a5a34, 1);
-      plank.fillRect(xMin - 6, top, riverWidth + 12, bridgeHeight);
-      plank.lineStyle(2, 0x5c3a1e, 0.8);
-      for (let px = xMin - 6; px < xMax + 6; px += 10) {
-        plank.lineBetween(px, top, px, top + bridgeHeight);
+      for (const at of bridgeAt) {
+        const plank = this.add.graphics().setDepth(3);
+        if (orientation === "vertical") {
+          const top = at - bridgeGap / 2;
+          plank.fillStyle(0x8a5a34, 1);
+          plank.fillRect(xMin - 6, top, w + 12, bridgeGap);
+          plank.lineStyle(2, 0x5c3a1e, 0.8);
+          for (let px = xMin - 6; px < xMax + 6; px += 10) plank.lineBetween(px, top, px, top + bridgeGap);
+          plank.lineStyle(3, 0x5c3a1e, 0.9);
+          plank.strokeRect(xMin - 6, top, w + 12, bridgeGap);
+        } else {
+          const left = at - bridgeGap / 2;
+          plank.fillStyle(0x8a5a34, 1);
+          plank.fillRect(left, yMin - 6, bridgeGap, h + 12);
+          plank.lineStyle(2, 0x5c3a1e, 0.8);
+          for (let py = yMin - 6; py < yMax + 6; py += 10) plank.lineBetween(left, py, left + bridgeGap, py);
+          plank.lineStyle(3, 0x5c3a1e, 0.9);
+          plank.strokeRect(left, yMin - 6, bridgeGap, h + 12);
+        }
       }
-      plank.lineStyle(3, 0x5c3a1e, 0.9);
-      plank.strokeRect(xMin - 6, top, riverWidth + 12, bridgeHeight);
     }
   }
 
@@ -901,9 +886,11 @@ export default class MainScene extends Phaser.Scene {
     this.buildNeutralResource();
   }
 
-  /** Mỏ vàng trung lập giữa 2 lãnh thổ — cả 2 bên đều cử dân qua được, nhưng phải băng đúng cây cầu */
+  /** Mỏ vàng trung lập giữa 2 lãnh thổ — cả 2 bên đều cử dân qua được, nhưng phải băng đúng cây cầu.
+   *  Hiện chỉ mỏ VÀNG đầu tiên trong danh sách được gắn logic tranh chấp/khai thác thật (các entry
+   *  khác nếu có chỉ mang tính trang trí) — xem `handleVillagerDeposit`. */
   private buildNeutralResource() {
-    const n = this.preset.neutralResource;
+    const n = this.preset.neutralResources.find((r) => r.kind === "gold");
     if (!n) return;
     const shadow = this.add.graphics().setDepth(2);
     shadow.fillStyle(0x000000, 0.2);
@@ -1293,7 +1280,9 @@ export default class MainScene extends Phaser.Scene {
 
   private isValidBuildSpot(x: number, y: number): boolean {
     if (!this.buildMode) return false;
-    if (this.riverBand && x > this.riverBand.xMin - 24 && x < this.riverBand.xMax + 24) return false;
+    for (const band of this.waterBands) {
+      if (x > band.xMin - 24 && x < band.xMax + 24 && y > band.yMin - 24 && y < band.yMax + 24) return false;
+    }
     for (const p of this.myBuildingPositions) {
       if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 50) return false;
     }
@@ -1381,8 +1370,10 @@ export default class MainScene extends Phaser.Scene {
     this.emitHud();
 
     const id = `${this.sync.playerId}-${this.unitCounter++}`;
-    const startX = this.mySide === "left" ? this.preset.baseMargin + 60 : this.preset.worldW - this.preset.baseMargin - 60;
-    const y = Phaser.Math.Between(this.preset.laneYMin, this.preset.laneYMax);
+    // Spawn ở phía "mặt trận" của base (ngược dấu facingDir — facingDir đẩy công trình RA SAU,
+    // nên quân mới xuất hiện ở hướng đối diện, tức là hướng ra chiến trường).
+    const startX = this.myBasePos.x - this.myFacingDir * 60;
+    const y = Phaser.Math.Clamp(this.myBasePos.y + Phaser.Math.Between(-50, 50), 20, this.preset.worldH - 20);
     const spriteKey = `${type}_${this.mySide === "left" ? "blue" : "red"}`;
     const sprite = this.add.sprite(startX, y, this.initialTexture(type, this.mySide === "left" ? "blue" : "red"), 0).setScale(0.4).setDepth(10);
     sprite.setFlipX(this.mySide === "right");
@@ -1506,7 +1497,6 @@ export default class MainScene extends Phaser.Scene {
     this.handlePinchZoom();
     if (this.gameOver || this.paused) return;
     const dt = delta / 1000;
-    const enemyBaseX = this.mySide === "left" ? this.preset.worldW - this.preset.baseMargin : this.preset.baseMargin;
 
     for (const u of this.localUnits.values()) {
       if (u.state === "dead") continue;
@@ -1535,7 +1525,7 @@ export default class MainScene extends Phaser.Scene {
       }
       const distToBase = isHealer
         ? Infinity
-        : Phaser.Math.Distance.Between(u.x, u.y, enemyBaseX, this.preset.worldH / 2);
+        : Phaser.Math.Distance.Between(u.x, u.y, this.enemyBasePos.x, this.enemyBasePos.y);
 
       const canHitUnit = actionTargetId !== null && actionDist <= cfg.range;
       const canHitBase = !isHealer && !canHitUnit && distToBase <= Math.max(cfg.range, BASE_HIT_RADIUS);
@@ -1567,10 +1557,10 @@ export default class MainScene extends Phaser.Scene {
           u.lastAnimState = "walk";
           u.sprite.play(`${u.spriteKey}-walk`, true);
         }
-        const finalX = u.manualTarget ? u.manualTarget.x : enemyBaseX;
-        const finalY = u.manualTarget ? u.manualTarget.y : this.preset.worldH / 2;
+        const finalX = u.manualTarget ? u.manualTarget.x : this.enemyBasePos.x;
+        const finalY = u.manualTarget ? u.manualTarget.y : this.enemyBasePos.y;
         this.followPath(u, finalX, finalY, cfg.speed, dt, !!u.manualTarget);
-        u.x = Phaser.Math.Clamp(u.x, this.preset.baseMargin - 40, this.preset.worldW - this.preset.baseMargin + 40);
+        u.x = Phaser.Math.Clamp(u.x, 20, this.preset.worldW - 20);
         u.y = Phaser.Math.Clamp(u.y, 20, this.preset.worldH - 20);
       }
 

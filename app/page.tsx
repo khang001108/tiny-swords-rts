@@ -218,59 +218,86 @@ function MapCard({ mapId, onPick }: { mapId: MapId; onPick: (m: MapId) => void }
   );
 }
 
-/** Xem trước bố cục bản đồ thật (vị trí căn cứ + mỏ tài nguyên) — dùng làm thumbnail trong danh sách chọn map */
+const NEUTRAL_RES_COLOR: Record<string, string> = { gold: "#facc15", wood: "#a3752c", meat: "#f472b6" };
+
+/** Xem trước bố cục bản đồ thật (căn cứ, vùng nước, đồi/rừng, mỏ tài nguyên) — dùng làm thumbnail
+ * trong danh sách chọn map. Đọc thẳng toạ độ thật trong MapPreset — 2 base không còn đối xứng
+ * nên không có phép "vẽ 1 bên rồi lật sang bên kia" như trước. */
 function MapPreviewSvg({ mapId }: { mapId: MapId }) {
   const p = MAP_PRESETS[mapId];
   const W = 88;
   const H = Math.round((p.worldH / p.worldW) * W);
   const sx = W / p.worldW;
   const sy = H / p.worldH;
-  const leftX = p.baseMargin * sx;
-  const rightX = (p.worldW - p.baseMargin) * sx;
-  const midY = (p.worldH / 2) * sy;
-  const forestH = Math.max(4, 18 * sy * (p.treeSpacing < 70 ? 0.8 : 1));
-  const riverX = p.riverX * sx;
-  const riverW = Math.max(3, p.riverWidth * sx);
 
-  const resDot = (baseX: number, dir: 1 | -1, color: string, kind: string) => {
+  const resDot = (base: { x: number; y: number; facingDir: 1 | -1 }, color: string, kind: "wood" | "gold" | "meat") => {
     const spec = RESOURCE_NODE_LAYOUT.find((r) => r.kind === kind)!;
-    const x = baseX + dir * spec.offsetX * sx;
-    const y = midY + spec.offsetY * sy;
-    return <circle key={`${dir > 0 ? "l" : "r"}-${kind}`} cx={x} cy={y} r={1.4} fill={color} />;
+    const x = (base.x + base.facingDir * spec.offsetX) * sx;
+    const y = (base.y + spec.offsetY) * sy;
+    return <circle key={`${base === p.baseLeft ? "l" : "r"}-${kind}`} cx={x} cy={y} r={1.4} fill={color} />;
   };
 
   return (
     <svg width={W} height={H} className="rounded shrink-0 border border-black/20" style={{ background: "#4a7a4a" }}>
-      <rect x={0} y={0} width={W} height={forestH} fill="#2f5a2f" />
-      <rect x={0} y={H - forestH} width={W} height={forestH} fill="#2f5a2f" />
-      <rect x={riverX - riverW / 2} y={0} width={riverW} height={H} fill="#2b8a8a" opacity={0.85} />
-      {p.bridgeYs.map((by, i) => (
-        <rect key={i} x={riverX - riverW / 2 - 2} y={by * sy - 5} width={riverW + 4} height={10} fill="#8a5a34" />
-      ))}
+      {p.waterBodies.map((band, bi) => {
+        const x = band.xMin * sx;
+        const y = band.yMin * sy;
+        const w = (band.xMax - band.xMin) * sx;
+        const h = (band.yMax - band.yMin) * sy;
+        return (
+          <g key={`w${bi}`}>
+            <rect x={x} y={y} width={w} height={h} fill="#2b8a8a" opacity={0.85} />
+            {band.bridgeAt.map((at, i) =>
+              band.orientation === "vertical" ? (
+                <rect key={i} x={x - 1} y={at * sy - 2.5} width={w + 2} height={5} fill="#8a5a34" />
+              ) : (
+                <rect key={i} x={at * sx - 2.5} y={y - 1} width={5} height={h + 2} fill="#8a5a34" />
+              )
+            )}
+          </g>
+        );
+      })}
       {p.hillSpecs.map((h, i) => (
         <circle key={`h${i}`} cx={h.x * sx} cy={h.y * sy} r={7 * h.scale} fill="#7fa9a3" opacity={0.8} />
       ))}
       {p.forestClusters.map((f, i) => (
         <circle key={`f${i}`} cx={f.x * sx} cy={f.y * sy} r={5 * f.scale + 2} fill="#1e4620" opacity={0.85} />
       ))}
-      {p.neutralResource && (
+      {p.neutralResources.map((n, i) => (
         <circle
-          cx={p.neutralResource.x * sx}
-          cy={p.neutralResource.y * sy}
+          key={`n${i}`}
+          cx={n.x * sx}
+          cy={n.y * sy}
           r={2.2}
-          fill="#facc15"
+          fill={NEUTRAL_RES_COLOR[n.kind]}
           stroke="#7a5c00"
           strokeWidth={0.5}
         />
-      )}
-      <rect x={leftX - 2.2} y={midY - 2.2} width={4.4} height={4.4} fill="#3b82f6" stroke="#1e293b" strokeWidth={0.4} />
-      <rect x={rightX - 2.2} y={midY - 2.2} width={4.4} height={4.4} fill="#ef4444" stroke="#1e293b" strokeWidth={0.4} />
-      {resDot(leftX, 1, "#a3752c", "wood")}
-      {resDot(leftX, 1, "#facc15", "gold")}
-      {resDot(leftX, 1, "#f472b6", "meat")}
-      {resDot(rightX, -1, "#a3752c", "wood")}
-      {resDot(rightX, -1, "#facc15", "gold")}
-      {resDot(rightX, -1, "#f472b6", "meat")}
+      ))}
+      <rect
+        x={p.baseLeft.x * sx - 2.2}
+        y={p.baseLeft.y * sy - 2.2}
+        width={4.4}
+        height={4.4}
+        fill="#3b82f6"
+        stroke="#1e293b"
+        strokeWidth={0.4}
+      />
+      <rect
+        x={p.baseRight.x * sx - 2.2}
+        y={p.baseRight.y * sy - 2.2}
+        width={4.4}
+        height={4.4}
+        fill="#ef4444"
+        stroke="#1e293b"
+        strokeWidth={0.4}
+      />
+      {resDot(p.baseLeft, "#a3752c", "wood")}
+      {resDot(p.baseLeft, "#facc15", "gold")}
+      {resDot(p.baseLeft, "#f472b6", "meat")}
+      {resDot(p.baseRight, "#a3752c", "wood")}
+      {resDot(p.baseRight, "#facc15", "gold")}
+      {resDot(p.baseRight, "#f472b6", "meat")}
     </svg>
   );
 }

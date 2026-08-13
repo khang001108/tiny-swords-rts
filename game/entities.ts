@@ -73,9 +73,9 @@ export const FRAME_SIZE = 192;
 // ── Bản đồ — dữ liệu map đã tách ra thư mục game/maps/ (xem game/maps/index.ts) ─────────
 // Re-export ở đây để mọi chỗ đang `import { MapPreset, MAP_PRESETS } from "@/game/entities"`
 // không phải sửa gì — nhưng dữ liệu THẬT giờ nằm ở game/maps/, không phải trong file này nữa.
-import type { MapPreset, MapId, BuildingKey } from "@/game/maps";
+import type { MapPreset, MapId, BuildingKey, BaseSpec, WaterBand } from "@/game/maps";
 import { MAP_PRESETS } from "@/game/maps";
-export type { MapPreset, MapId, BuildingKey };
+export type { MapPreset, MapId, BuildingKey, BaseSpec, WaterBand };
 export { MAP_PRESETS };
 
 export const BASE_POP_CAP = 6;

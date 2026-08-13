@@ -17,6 +17,7 @@ import {
   UNIT_CONFIGS,
   UnitType,
   MapId,
+  MAP_PRESETS,
   VILLAGER_COST,
   HOUSE_COST,
   RESOURCE_HOUSE_COST,
@@ -189,6 +190,7 @@ export default function GameCanvas({
   };
 
   const atCap = hud.myUnits >= hud.popCap;
+  const hasNeutralResource = MAP_PRESETS[mapId].neutralResources.length > 0;
 
   return (
     <div className="w-full mx-auto" style={{ maxWidth: 900 }}>
@@ -279,8 +281,9 @@ export default function GameCanvas({
             style={{ top: "24%" }}
           >
             <div className="pointer-events-auto max-w-[88%] bg-black/60 text-white text-xs text-center rounded-lg px-3 py-2 shadow-lg border border-white/10">
-              💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh. Có
-              mỏ vàng viền sáng giữa bản đồ ai cũng khai thác được — bấm dân rồi bấm vào đó để cử qua tranh mỏ!
+              💡 Bấm vào <b>Lâu đài</b> để xây dựng và tuyển quân — bấm lính rồi bấm nơi muốn tới để ra lệnh.
+              {hasNeutralResource &&
+                " Có mỏ vàng viền sáng giữa bản đồ ai cũng khai thác được — bấm dân rồi bấm vào đó để cử qua tranh mỏ!"}
             </div>
           </div>
         )}
